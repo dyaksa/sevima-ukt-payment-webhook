@@ -23,6 +23,10 @@ class CalculateInvoiceStatus
                 && $transaction->amount === $invoice->amount,
         );
 
-        return $hasValidPayment ? InvoiceStatus::Paid : InvoiceStatus::Unpaid;
+        if ($hasValidPayment) {
+            return InvoiceStatus::Paid;
+        }
+
+        return $transactions->contains('kind', TransactionKind::Expiry) ? InvoiceStatus::Expired : InvoiceStatus::Unpaid;
     }
 }
