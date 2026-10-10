@@ -6,6 +6,10 @@ use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->name('v1.')->middleware(['auth:sanctum', 'institution'])->group(function () {
+    Route::get('invoices', [InvoiceController::class, 'index'])
+        ->middleware(TokenAbility::InvoicesRead->middleware())
+        ->name('invoices.index');
+
     Route::post('invoices', [InvoiceController::class, 'store'])
         ->middleware(TokenAbility::InvoicesWrite->middleware())
         ->name('invoices.store');

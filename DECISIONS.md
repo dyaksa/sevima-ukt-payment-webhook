@@ -27,3 +27,15 @@ Smaller rulings the candidate made while a ticket was built.
 **Decision.** Option 2. PostgreSQL passes the check for NULL, so a present amount is still a positive integer.
 
 **Consequences.** The ledger holds only amounts the gateway actually sent. The status calculator must treat an empty amount as "no money moved", which it already does by matching only payment rows by amount.
+
+### A list endpoint filters by the caller's institution explicitly
+
+**Context.** Isolation has two layers: the institution scope, then a policy. For one record, `show` calls `InvoicePolicy::view`, which compares the record's institution with the user's. A list has no single record to check, and a `viewAny` policy sees only the user, so it cannot catch a scope that returns the wrong rows.
+
+**Options.**
+1. Rely on the institution scope alone for lists.
+2. Add an explicit `where('institution_id', $user->institution_id)` to the list query as the second layer.
+
+**Decision.** Option 2.
+
+**Consequences.** Listing a student's invoices stays inside the caller's institution even if the institution context were set wrong. A test covers this by replacing the institution-context middleware with one that points at another institution. Future list endpoints follow the same pattern.

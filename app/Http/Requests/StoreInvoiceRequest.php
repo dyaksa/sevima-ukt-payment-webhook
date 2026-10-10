@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Models\Scopes\InstitutionScope;
 use App\Rules\IntegerAmount;
+use App\Rules\SemesterCode;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -30,21 +31,9 @@ class StoreInvoiceRequest extends FormRequest
                 Rule::unique('invoices')->where('institution_id', InstitutionScope::currentInstitutionId()),
             ],
             'student_number' => ['required', 'string', 'max:32'],
-            'semester' => ['required', 'string', 'regex:/^SM-\d{4}-[1-3]$/'],
+            'semester' => ['required', new SemesterCode],
             'amount' => ['required', new IntegerAmount],
             'expires_at' => ['required', 'date', 'after:now'],
-        ];
-    }
-
-    /**
-     * Get custom messages for validator errors.
-     *
-     * @return array<string, string>
-     */
-    public function messages(): array
-    {
-        return [
-            'semester.regex' => 'The semester must look like SM-2026-1: the SM prefix, a year, and a term number from 1 to 3.',
         ];
     }
 }
