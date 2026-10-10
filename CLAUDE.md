@@ -92,6 +92,15 @@ Each item pairs the limit with the path to follow.
 - **Adding dependencies, editing committed migrations, or integrating a real gateway** without the candidate's approval. Schema changes go in a new migration, and the gateway is the mock.
 - **Declaring work done before the related tests run green.**
 
+## Enforced guards
+
+The hard limits are also enforced mechanically, and each block names the limit it protects. When a guard blocks legitimate work, ask the candidate to change the guard.
+
+- `.claude/settings.json`: asks before dependency changes, denies reading `.env` and editing the guards. Hooks in `.claude/hooks/` refuse edits to committed migrations, scope escapes in `app/`, secret-shaped values, `git commit --no-verify`, and ending a turn while tests are red.
+- `.githooks/pre-commit` (enable once per clone: `git config core.hooksPath .githooks`): refuses changes to committed migrations and secret-shaped values, then runs a global pre-commit hook if one is configured.
+- Tests: `tests/Unit/ArchitectureTest.php`, `tests/Feature/SourceGuardsTest.php`, and `Http::preventStrayRequests()` in `tests/TestCase.php`.
+- Research behind these choices: `docs/research/agent-guardrails.md`.
+
 ## Rules loaded every session
 
 Claude Code loads these from `.claude/rules/` alongside this file:
