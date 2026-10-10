@@ -1,0 +1,56 @@
+{
+    "$schema": "https://json.schemastore.org/claude-code-settings.json",
+    "permissions": {
+        "deny": [
+            "Read(./.env)",
+            "Edit(.claude/settings.json)",
+            "Edit(.claude/hooks/**)",
+            "Edit(.githooks/**)"
+        ],
+        "ask": [
+            "Bash(composer require *)",
+            "Bash(composer remove *)",
+            "Bash(vendor/bin/sail composer require *)",
+            "Bash(vendor/bin/sail composer remove *)",
+            "Bash(npm install *)",
+            "Bash(vendor/bin/sail npm install *)",
+            "Edit(composer.json)",
+            "Edit(composer.lock)",
+            "Edit(package.json)",
+            "Edit(package-lock.json)"
+        ]
+    },
+    "hooks": {
+        "PreToolUse": [
+            {
+                "matcher": "Edit|Write",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "php \"${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-edit.php\""
+                    }
+                ]
+            },
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "php \"${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-commit.php\""
+                    }
+                ]
+            }
+        ],
+        "Stop": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "php \"${CLAUDE_PROJECT_DIR}/.claude/hooks/require-green-tests.php\"",
+                        "timeout": 600
+                    }
+                ]
+            }
+        ]
+    }
+}
