@@ -28,7 +28,8 @@ class StoreWebhookRequest extends FormRequest
      */
     public function rules(): array
     {
-        $event = WebhookEvent::fromWireName((string) $this->input('event'));
+        $eventName = $this->input('event');
+        $event = is_string($eventName) ? WebhookEvent::fromWireName($eventName) : null;
         $resourceIdField = $event?->resourceIdField();
 
         return [
