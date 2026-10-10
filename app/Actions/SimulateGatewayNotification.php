@@ -17,7 +17,7 @@ class SimulateGatewayNotification
     /**
      * Times Xendit delivers one notification at most: the first try plus its retries.
      */
-    public const int XENDIT_DELIVERY_ATTEMPTS = 6;
+    private const int XENDIT_DELIVERY_ATTEMPTS = 6;
 
     /**
      * Play a gateway scenario for one invoice: build a Xendit-shaped payload,
@@ -36,8 +36,8 @@ class SimulateGatewayNotification
         $invoice = Invoice::where('invoice_number', $invoiceNumber)->firstOrFail();
 
         $payload = match ($scenario) {
+            GatewayScenario::Success, GatewayScenario::BadSignature, GatewayScenario::Retry => $this->capturePayload($institution, $invoice),
             GatewayScenario::Expiry => $this->expiryPayload($institution, $invoice),
-            default => $this->capturePayload($institution, $invoice),
         };
         $body = json_encode($payload, JSON_THROW_ON_ERROR);
         $secret = $scenario === GatewayScenario::BadSignature ? Str::random(64) : $institution->hmac_secret;

@@ -55,7 +55,6 @@ it('sends the same signed capture six times in the retry scenario', function () 
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
     Http::fake([route('v1.webhooks.store') => Http::sequence()
         ->push(['outcome' => 'accepted'])
-        ->pushResponse(Http::response(['outcome' => 'duplicate']))
         ->whenEmpty(Http::response(['outcome' => 'duplicate']))]);
 
     $this->artisan('gateway:simulate', ['scenario' => 'retry', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
