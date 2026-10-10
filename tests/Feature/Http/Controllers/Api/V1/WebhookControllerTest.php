@@ -215,24 +215,30 @@ describe('payload', function () {
             ->assertJsonValidationErrors(['event']);
     });
 
-    it('rejects an expiry without a payment request id with 422', function () {
+    it('rejects an event without the fields it requires with 422', function (array $payload, string $missingField) {
         $institution = Institution::factory()->create();
         Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
-        $payload = expiryPayload();
-        unset($payload['data']['payment_request_id']);
+        unset($payload['data'][$missingField]);
 
-        sendSignedWebhook($institution, $payload)->assertUnprocessable()->assertJsonValidationErrors('data.payment_request_id');
+        sendSignedWebhook($institution, $payload)->assertUnprocessable()->assertJsonValidationErrors("data.{$missingField}");
 
         $this->assertDatabaseCount('transactions', 0);
-    });
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
+    })->with([
+        'capture without a payment id' => [capturePayload(), 'payment_id'],
+        'capture without captures' => [capturePayload(), 'captures'],
+        'expiry without a payment request id' => [expiryPayload(), 'payment_request_id'],
+    ]);
 
     it('rejects an event name that is not a string with 422 and logs it', function () {
         $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
 
         sendSignedWebhook($institution, [...expiryPayload(), 'event' => ['payment_request.expiry']])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('event');
 
+        $this->assertDatabaseCount('transactions', 0);
         $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
     });
 
