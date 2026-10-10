@@ -26,6 +26,7 @@ class InvoiceResource extends JsonResource
             'status' => $this->status,
             'expires_at' => $this->expires_at->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
+            'transactions' => TransactionResource::collection($this->whenLoaded('transactions')),
         ];
     }
 }
