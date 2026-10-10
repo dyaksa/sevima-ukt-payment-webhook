@@ -242,6 +242,18 @@ describe('payload', function () {
         $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
     });
 
+    it('rejects an event time PostgreSQL cannot store with 422', function () {
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, capturePayload(['updated' => '0000-01-01T00:00:00Z']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['data.updated']);
+
+        $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
+    });
+
     it('rejects an identifier with a control character with 422', function (array $payload, string $field) {
         $institution = Institution::factory()->create();
         Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
