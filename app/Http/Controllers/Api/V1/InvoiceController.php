@@ -20,12 +20,13 @@ class InvoiceController extends Controller
     }
 
     /**
-     * Show one of the caller's institution's invoices by its number.
+     * Show one of the caller's institution's invoices by its number, with its
+     * transaction history.
      */
     public function show(Invoice $invoice): InvoiceResource
     {
         Gate::authorize('view', $invoice);
 
-        return InvoiceResource::make($invoice);
+        return InvoiceResource::make($invoice->load('transactions'));
     }
 }
