@@ -238,6 +238,31 @@ describe('processing', function () {
         $this->assertDatabaseHas('webhook_logs', ['outcome' => 'duplicate', 'idempotency_key' => 'payment.capture:py-0001']);
     });
 
+    it('changes the state exactly once when the gateway sends the same event six times', function () {
+        $institution = Institution::factory()->create();
+        $invoice = Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        $body = json_encode(capturePayload());
+
+        $outcomes = collect(range(1, 6))->map(fn () => sendSignedWebhook($institution, $body)->assertOk()->json('outcome'));
+
+        expect($outcomes->all())->toBe(['accepted', 'duplicate', 'duplicate', 'duplicate', 'duplicate', 'duplicate'])
+            ->and($invoice->fresh()->status->value)->toBe('paid');
+        $this->assertDatabaseCount('transactions', 1);
+        $this->assertDatabaseCount('webhook_logs', 6);
+    });
+
+    it('pays only the signing institution invoice when another institution has the same invoice number', function () {
+        $institution = Institution::factory()->create();
+        $invoice = Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        $otherInvoice = Invoice::factory()->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, capturePayload())->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        expect($invoice->fresh()->status->value)->toBe('paid')
+            ->and($otherInvoice->fresh()->status->value)->toBe('unpaid');
+        $this->assertDatabaseMissing('transactions', ['invoice_id' => $otherInvoice->id]);
+    });
+
     it('rolls back on an unexpected error and logs it separately', function () {
         $institution = Institution::factory()->create();
         $invoice = Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
