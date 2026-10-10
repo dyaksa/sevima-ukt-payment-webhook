@@ -27,6 +27,10 @@ class CalculateInvoiceStatus
             return InvoiceStatus::Paid;
         }
 
-        return $transactions->contains('kind', TransactionKind::Expiry) ? InvoiceStatus::Expired : InvoiceStatus::Unpaid;
+        $hasExpiry = $transactions->contains(
+            fn (Transaction $transaction): bool => $transaction->kind === TransactionKind::Expiry,
+        );
+
+        return $hasExpiry ? InvoiceStatus::Expired : InvoiceStatus::Unpaid;
     }
 }

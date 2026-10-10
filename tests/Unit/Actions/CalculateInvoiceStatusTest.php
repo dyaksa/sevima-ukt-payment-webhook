@@ -11,12 +11,21 @@ pest()->extend(TestCase::class);
 
 it('derives the status from the invoice amount and its ledger', function (array $ledger, InvoiceStatus $expected) {
     $invoice = Invoice::factory()->make(['amount' => 4_500_000]);
-    $transactions = collect($ledger)->map(fn (array $row) => Transaction::factory()->make(['kind' => $row[0], 'amount' => $row[1]]));
+    $transactions = collect($ledger)->map(fn (array $attributes) => Transaction::factory()->make($attributes));
 
     expect((new CalculateInvoiceStatus)->handle($invoice, $transactions))->toBe($expected);
 })->with([
     'no transactions' => [[], InvoiceStatus::Unpaid],
-    'a capture of the exact amount' => [[[TransactionKind::Payment, 4_500_000]], InvoiceStatus::Paid],
-    'an expiry' => [[[TransactionKind::Expiry, null]], InvoiceStatus::Expired],
-    'an expiry after a capture of the exact amount' => [[[TransactionKind::Payment, 4_500_000], [TransactionKind::Expiry, null]], InvoiceStatus::Paid],
+    'a capture of the exact amount' => [
+        [['kind' => TransactionKind::Payment, 'amount' => 4_500_000]],
+        InvoiceStatus::Paid,
+    ],
+    'an expiry' => [
+        [['kind' => TransactionKind::Expiry, 'amount' => null]],
+        InvoiceStatus::Expired,
+    ],
+    'an expiry after a capture of the exact amount' => [
+        [['kind' => TransactionKind::Payment, 'amount' => 4_500_000], ['kind' => TransactionKind::Expiry, 'amount' => null]],
+        InvoiceStatus::Paid,
+    ],
 ]);
