@@ -34,6 +34,30 @@ function capturePayload(array $data = []): array
 }
 
 /**
+ * A Xendit-shaped payment request expiry notification for an invoice.
+ *
+ * @param  array<string, mixed>  $data
+ * @return array<string, mixed>
+ */
+function expiryPayload(array $data = [], string $event = 'payment_request.expiry'): array
+{
+    return [
+        'event' => $event,
+        'business_id' => 'UNIV-A',
+        'created' => '2026-10-10T09:00:01.000Z',
+        'data' => [
+            'payment_request_id' => 'pr-0001',
+            'reference_id' => 'INV-2026-0001',
+            'currency' => 'IDR',
+            'request_amount' => 4_500_000,
+            'status' => 'EXPIRED',
+            'updated' => '2026-10-10T09:00:00.000Z',
+            ...$data,
+        ],
+    ];
+}
+
+/**
  * Post a raw body to the webhook, signed with the given secret (by default the
  * institution's own), exactly as the gateway sends it.
  */
@@ -191,6 +215,14 @@ describe('payload', function () {
             ->assertJsonValidationErrors(['event']);
     });
 
+    it('rejects an expiry without a payment request id with 422', function () {
+        $institution = Institution::factory()->create();
+        $payload = expiryPayload();
+        unset($payload['data']['payment_request_id']);
+
+        sendSignedWebhook($institution, $payload)->assertUnprocessable()->assertJsonValidationErrors('data.payment_request_id');
+    });
+
     it('accepts the brief alias payment.success as a capture', function () {
         $institution = Institution::factory()->create();
         $invoice = Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
@@ -261,6 +293,33 @@ describe('processing', function () {
         expect($invoice->fresh()->status->value)->toBe('paid')
             ->and($otherInvoice->fresh()->status->value)->toBe('unpaid');
         $this->assertDatabaseMissing('transactions', ['invoice_id' => $otherInvoice->id]);
+    });
+
+    it('marks an unpaid invoice expired on the gateway expiry event', function (string $event) {
+        $institution = Institution::factory()->create();
+        $invoice = Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, expiryPayload(event: $event))->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        expect($invoice->fresh()->status->value)->toBe('expired');
+        $this->assertDatabaseHas('transactions', [
+            'invoice_id' => $invoice->id,
+            'idempotency_key' => 'payment_request.expiry:pr-0001',
+            'kind' => 'expiry',
+            'amount' => null,
+            'gateway_payment_id' => null,
+        ]);
+    })->with(['payment_request.expiry', 'payment.expired']);
+
+    it('keeps a paid invoice paid when the expiry event arrives', function () {
+        $institution = Institution::factory()->create();
+        $invoice = Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, capturePayload())->assertOk();
+        sendSignedWebhook($institution, expiryPayload())->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        expect($invoice->fresh()->status->value)->toBe('paid');
+        $this->assertDatabaseCount('transactions', 2);
     });
 
     it('rolls back on an unexpected error and logs it separately', function () {
