@@ -334,6 +334,23 @@ describe('processing', function () {
         sendSignedWebhook($institution, expiryPayload(['payment_id' => null]))->assertOk()->assertJson(['outcome' => 'accepted']);
 
         expect($invoice->fresh()->status->value)->toBe('expired');
+        $this->assertDatabaseHas('transactions', [
+            'invoice_id' => $invoice->id,
+            'idempotency_key' => 'payment_request.expiry:pr-0001',
+            'kind' => 'expiry',
+            'gateway_payment_id' => null,
+        ]);
+    });
+
+    it('answers a repeated expiry with 200 and records it once', function () {
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, expiryPayload())->assertOk()->assertJson(['outcome' => 'accepted']);
+        sendSignedWebhook($institution, expiryPayload(event: 'payment.expired'))->assertOk()->assertJson(['outcome' => 'duplicate']);
+
+        $this->assertDatabaseCount('transactions', 1);
+        $this->assertDatabaseHas('webhook_logs', ['outcome' => 'duplicate', 'idempotency_key' => 'payment_request.expiry:pr-0001']);
     });
 
     it('keeps a paid invoice paid when the expiry event arrives', function () {

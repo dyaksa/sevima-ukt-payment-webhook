@@ -62,9 +62,9 @@ it('sends the same signed capture six times in the retry scenario', function () 
         ->expectsOutputToContain('duplicate')
         ->assertSuccessful();
 
+    Http::assertSentCount(6);
     $sent = Http::recorded()->map(fn (array $pair) => $pair[0]);
-    expect($sent)->toHaveCount(6)
-        ->and($sent->map(fn (Request $request) => $request->body())->unique())->toHaveCount(1)
+    expect($sent->map(fn (Request $request) => $request->body())->unique())->toHaveCount(1)
         ->and($sent->first()->header('X-Signature'))->toBe([hash_hmac('sha256', $sent->first()->body(), $institution->hmac_secret)])
         ->and($sent->first()['event'])->toBe('payment.capture');
 });
