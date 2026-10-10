@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\SemesterCode;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -20,19 +21,7 @@ class IndexInvoiceRequest extends FormRequest
     {
         return [
             'student_number' => ['required', 'string', 'max:32'],
-            'semester' => ['nullable', 'string', 'regex:/^SM-\d{4}-[1-3]$/'],
-        ];
-    }
-
-    /**
-     * Get custom messages for validator errors.
-     *
-     * @return array<string, string>
-     */
-    public function messages(): array
-    {
-        return [
-            'semester.regex' => 'The semester must look like SM-2026-1: the SM prefix, a year, and a term number from 1 to 3.',
+            'semester' => ['nullable', new SemesterCode],
         ];
     }
 }
