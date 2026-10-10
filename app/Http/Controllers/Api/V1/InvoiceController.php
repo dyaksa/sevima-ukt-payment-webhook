@@ -15,11 +15,14 @@ class InvoiceController extends Controller
 {
     /**
      * List one student's invoices in the caller's institution, newest semester
-     * first, each with its transaction history.
+     * first, each with its transaction history. The explicit institution filter
+     * is the second isolation layer behind the institution scope, as the
+     * policy is for `show`.
      */
     public function index(IndexInvoiceRequest $request): AnonymousResourceCollection
     {
         $invoices = Invoice::query()
+            ->where('institution_id', $request->user()->institution_id)
             ->where('student_number', $request->validated('student_number'))
             ->when($request->validated('semester'), fn ($query, string $semester) => $query->where('semester', $semester))
             ->orderByDesc('semester')

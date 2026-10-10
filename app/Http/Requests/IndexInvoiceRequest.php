@@ -8,7 +8,8 @@ use Illuminate\Foundation\Http\FormRequest;
 
 /**
  * Access is enforced by the `invoices:read` token ability on the route; the
- * institution scope limits the list to the caller's own institution.
+ * institution scope and an explicit filter on the caller's institution limit
+ * the list to that institution.
  */
 class IndexInvoiceRequest extends FormRequest
 {

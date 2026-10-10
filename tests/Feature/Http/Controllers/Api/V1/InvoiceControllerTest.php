@@ -1,10 +1,14 @@
 <?php
 
 use App\Enums\TokenAbility;
+use App\Http\Middleware\SetInstitutionContext;
 use App\Models\Institution;
 use App\Models\Invoice;
+use App\Models\Scopes\InstitutionScope;
 use App\Models\Transaction;
 use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 
@@ -144,6 +148,27 @@ describe('index', function () {
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.invoice_number', 'INV-OWN')
             ->assertJsonPath('data.0.status', 'unpaid');
+    });
+
+    it('still lists only the caller institution invoices when the institution context is wrong', function () {
+        $user = User::factory()->create();
+        $otherInvoice = Invoice::factory()->create(['student_number' => '2021000123']);
+        app()->instance(SetInstitutionContext::class, new class($otherInvoice->institution_id)
+        {
+            public function __construct(private string $institutionId) {}
+
+            public function handle(Request $request, Closure $next): mixed
+            {
+                Context::add(InstitutionScope::CONTEXT_KEY, $this->institutionId);
+
+                return $next($request);
+            }
+        });
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+
+        $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
     });
 
     it('filters a student invoices by semester', function () {
