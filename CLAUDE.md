@@ -50,9 +50,15 @@ Multi-institution backend for tuition (UKT) invoices, one per student per semest
 
 - Follow the Laravel Boost block below and sibling files. Create files with `php artisan make:`.
 - Core logic has automated tests: HMAC verification, the status function, and institution isolation (institution A cannot read or change institution B's data).
-- One meaningful change per commit; the message explains why.
 - HMAC secrets live in the database, encrypted, and every runtime reader (webhook verification, the simulator) reads them there. The environment only optionally supplies the seeded institutions' secrets through `config/`; when empty, the seeder generates one and prints it once.
 - Documentation and comments are written in English.
+
+### Git workflow
+
+- One branch per ticket, cut from an up-to-date `master`, named by Conventional Branch: `<type>/<description>` in lowercase letters, digits, and hyphens. `feat/` for ticket features, `fix/` for bug fixes, `chore/` for docs, config, and tooling. The ticket number leads the description: `feat/03-student-invoices`.
+- One meaningful change per commit, written as a Conventional Commit: `<type>(<optional scope>): <summary>` with `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `build`, or `ci`; the body explains why. Example: `feat(invoices): list a student's invoices`.
+- When the ticket's tests are green, push the branch and open a pull request to `master` with `gh pr create`: the title uses the same Conventional Commit format, and the body names the ticket and lists what changed, the decisions to review, and the test evidence.
+- Merging is the candidate's step, after review. Use a merge commit rather than a squash, so the granular commits stay in `master`'s history.
 
 ### Code architecture (Laravel patterns)
 
