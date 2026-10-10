@@ -20,6 +20,17 @@ use Illuminate\Validation\Rule;
 class StoreWebhookRequest extends FormRequest
 {
     /**
+     * Validate only the signed JSON body; the query string is not covered by
+     * the signature, so it must not fill in missing keys.
+     *
+     * @return array<string, mixed>
+     */
+    public function validationData(): array
+    {
+        return $this->json()->all();
+    }
+
+    /**
      * Get the validation rules that apply to the request. Only the capture
      * and expiry events are handled so far; later tickets widen the list.
      * Each event requires the id of its own resource.
@@ -28,7 +39,7 @@ class StoreWebhookRequest extends FormRequest
      */
     public function rules(): array
     {
-        $eventName = $this->input('event');
+        $eventName = $this->json('event');
         $event = is_string($eventName) ? WebhookEvent::fromWireName($eventName) : null;
         $resourceIdField = $event?->resourceIdField();
 
