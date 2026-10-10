@@ -44,6 +44,19 @@ enum WebhookEvent: string
     }
 
     /**
+     * The `data` field naming the gateway resource the event is about; with
+     * the event name it forms the idempotency key.
+     */
+    public function resourceIdField(): string
+    {
+        return match ($this) {
+            self::PaymentAuthorization, self::PaymentCapture, self::PaymentFailure => 'payment_id',
+            self::PaymentRequestExpiry => 'payment_request_id',
+            self::RefundSucceeded, self::RefundFailed => 'id',
+        };
+    }
+
+    /**
      * The ledger kind this event records.
      */
     public function kind(): TransactionKind

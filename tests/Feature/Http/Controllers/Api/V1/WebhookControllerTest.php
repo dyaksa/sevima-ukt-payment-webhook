@@ -309,7 +309,19 @@ describe('processing', function () {
             'amount' => null,
             'gateway_payment_id' => null,
         ]);
-    })->with(['payment_request.expiry', 'payment.expired']);
+    })->with([
+        'wire name' => 'payment_request.expiry',
+        'brief alias' => 'payment.expired',
+    ]);
+
+    it('accepts an expiry that sends a null payment id', function () {
+        $institution = Institution::factory()->create();
+        $invoice = Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, expiryPayload(['payment_id' => null]))->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        expect($invoice->fresh()->status->value)->toBe('expired');
+    });
 
     it('keeps a paid invoice paid when the expiry event arrives', function () {
         $institution = Institution::factory()->create();
