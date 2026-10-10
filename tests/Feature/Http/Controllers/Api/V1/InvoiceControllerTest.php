@@ -158,6 +158,17 @@ describe('index', function () {
             ->assertJsonPath('data.0.invoice_number', 'INV-EVEN');
     });
 
+    it('treats an empty semester filter as no filter', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->count(2)->sequence(['semester' => 'SM-2026-1'], ['semester' => 'SM-2026-2'])
+            ->create(['student_number' => '2021000123']);
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+
+        $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123', 'semester' => '']))
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+    });
+
     it('orders a student invoices by newest semester, then by newest invoice', function () {
         $user = User::factory()->create();
         $invoice = fn (string $number, string $semester) => Invoice::factory()->for($user->institution)
@@ -172,27 +183,45 @@ describe('index', function () {
         expect($response->json('data.*.invoice_number'))->toBe(['INV-2026-1-SECOND', 'INV-2026-1-FIRST', 'INV-2025-2']);
     });
 
-    it('includes each invoice transaction history in event order, loaded in one query', function () {
+    it('includes each invoice transaction history in event order', function () {
         $user = User::factory()->create();
-        $invoices = Invoice::factory()->for($user->institution)->count(3)->create(['student_number' => '2021000123']);
-        $transaction = fn (Invoice $invoice, string $key, string $occurredAt) => Transaction::factory()->for($invoice)
+        $paid = Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-PAID', 'student_number' => '2021000123', 'semester' => 'SM-2026-2']);
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-UNPAID', 'student_number' => '2021000123', 'semester' => 'SM-2026-1']);
+        $transaction = fn (string $key, string $occurredAt) => Transaction::factory()->for($paid)
             ->create(['institution_id' => $user->institution_id, 'idempotency_key' => $key, 'occurred_at' => $occurredAt]);
-        $transaction($invoices[0], 'payment.capture:late', '2026-10-02T10:00:00+07:00');
-        $transaction($invoices[0], 'payment.capture:early', '2026-10-01T10:00:00+07:00');
-        $transaction($invoices[1], 'payment.capture:other', '2026-10-01T10:00:00+07:00');
+        $transaction('payment.capture:late', '2026-10-02T10:00:00+07:00');
+        $transaction('payment.capture:early', '2026-10-01T10:00:00+07:00');
         Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
 
-        DB::enableQueryLog();
-        $response = $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))->assertOk();
-        $transactionQueries = collect(DB::getQueryLog())->filter(fn (array $query) => str_contains($query['query'], 'from "transactions"'));
+        $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))
+            ->assertOk()
+            ->assertJsonPath('data.0.invoice_number', 'INV-PAID')
+            ->assertJsonPath('data.0.transactions.0.idempotency_key', 'payment.capture:early')
+            ->assertJsonPath('data.0.transactions.1.idempotency_key', 'payment.capture:late')
+            ->assertJsonPath('data.1.invoice_number', 'INV-UNPAID')
+            ->assertJsonPath('data.1.transactions', []);
+    });
 
-        $histories = collect($response->json('data'))->mapWithKeys(fn (array $invoice) => [
-            $invoice['invoice_number'] => array_column($invoice['transactions'], 'idempotency_key'),
-        ]);
-        expect($histories[$invoices[0]->invoice_number])->toBe(['payment.capture:early', 'payment.capture:late'])
-            ->and($histories[$invoices[1]->invoice_number])->toBe(['payment.capture:other'])
-            ->and($histories[$invoices[2]->invoice_number])->toBe([])
-            ->and($transactionQueries)->toHaveCount(1);
+    it('runs the same number of queries however many invoices the student has', function () {
+        $user = User::factory()->create();
+        $issueInvoiceWithPayment = fn () => Transaction::factory()
+            ->for(Invoice::factory()->for($user->institution)->create(['student_number' => '2021000123']))
+            ->create(['institution_id' => $user->institution_id]);
+        $countQueries = function () {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))->assertOk();
+
+            return count(DB::getQueryLog());
+        };
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+
+        $issueInvoiceWithPayment();
+        $queriesForOneInvoice = $countQueries();
+        $issueInvoiceWithPayment();
+        $issueInvoiceWithPayment();
+
+        expect($countQueries())->toBe($queriesForOneInvoice);
     });
 
     it('rejects a malformed semester filter with 422', function () {

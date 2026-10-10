@@ -20,7 +20,7 @@ class IndexInvoiceRequest extends FormRequest
     {
         return [
             'student_number' => ['required', 'string', 'max:32'],
-            'semester' => ['sometimes', 'string', 'regex:/^SM-\d{4}-[1-3]$/'],
+            'semester' => ['nullable', 'string', 'regex:/^SM-\d{4}-[1-3]$/'],
         ];
     }
 
