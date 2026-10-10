@@ -3,7 +3,9 @@
 use App\Enums\TokenAbility;
 use App\Models\Institution;
 use App\Models\Invoice;
+use App\Models\Transaction;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 
 /**
@@ -126,6 +128,97 @@ describe('store', function () {
 
     it('returns 401 when no token is provided', function () {
         $this->postJson(route('v1.invoices.store'), invoicePayload())->assertUnauthorized();
+    });
+});
+
+describe('index', function () {
+    it('lists only the caller institution invoices of one student number', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-OWN', 'student_number' => '2021000123']);
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-OTHER-STUDENT', 'student_number' => '2021000999']);
+        Invoice::factory()->create(['invoice_number' => 'INV-OTHER-INSTITUTION', 'student_number' => '2021000123']);
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+
+        $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.invoice_number', 'INV-OWN')
+            ->assertJsonPath('data.0.status', 'unpaid');
+    });
+
+    it('filters a student invoices by semester', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-ODD', 'student_number' => '2021000123', 'semester' => 'SM-2026-1']);
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-EVEN', 'student_number' => '2021000123', 'semester' => 'SM-2026-2']);
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+
+        $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123', 'semester' => 'SM-2026-2']))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.invoice_number', 'INV-EVEN');
+    });
+
+    it('orders a student invoices by newest semester, then by newest invoice', function () {
+        $user = User::factory()->create();
+        $invoice = fn (string $number, string $semester) => Invoice::factory()->for($user->institution)
+            ->create(['invoice_number' => $number, 'student_number' => '2021000123', 'semester' => $semester]);
+        $invoice('INV-2026-1-FIRST', 'SM-2026-1');
+        $invoice('INV-2025-2', 'SM-2025-2');
+        $invoice('INV-2026-1-SECOND', 'SM-2026-1');
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+
+        $response = $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))->assertOk();
+
+        expect($response->json('data.*.invoice_number'))->toBe(['INV-2026-1-SECOND', 'INV-2026-1-FIRST', 'INV-2025-2']);
+    });
+
+    it('includes each invoice transaction history in event order, loaded in one query', function () {
+        $user = User::factory()->create();
+        $invoices = Invoice::factory()->for($user->institution)->count(3)->create(['student_number' => '2021000123']);
+        $transaction = fn (Invoice $invoice, string $key, string $occurredAt) => Transaction::factory()->for($invoice)
+            ->create(['institution_id' => $user->institution_id, 'idempotency_key' => $key, 'occurred_at' => $occurredAt]);
+        $transaction($invoices[0], 'payment.capture:late', '2026-10-02T10:00:00+07:00');
+        $transaction($invoices[0], 'payment.capture:early', '2026-10-01T10:00:00+07:00');
+        $transaction($invoices[1], 'payment.capture:other', '2026-10-01T10:00:00+07:00');
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+
+        DB::enableQueryLog();
+        $response = $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))->assertOk();
+        $transactionQueries = collect(DB::getQueryLog())->filter(fn (array $query) => str_contains($query['query'], 'from "transactions"'));
+
+        $histories = collect($response->json('data'))->mapWithKeys(fn (array $invoice) => [
+            $invoice['invoice_number'] => array_column($invoice['transactions'], 'idempotency_key'),
+        ]);
+        expect($histories[$invoices[0]->invoice_number])->toBe(['payment.capture:early', 'payment.capture:late'])
+            ->and($histories[$invoices[1]->invoice_number])->toBe(['payment.capture:other'])
+            ->and($histories[$invoices[2]->invoice_number])->toBe([])
+            ->and($transactionQueries)->toHaveCount(1);
+    });
+
+    it('rejects a malformed semester filter with 422', function () {
+        Sanctum::actingAs(User::factory()->create(), [TokenAbility::InvoicesRead->value]);
+
+        $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123', 'semester' => 'Ganjil 2026']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['semester' => 'The semester must look like SM-2026-1: the SM prefix, a year, and a term number from 1 to 3.']);
+    });
+
+    it('rejects a request without a student number with 422', function () {
+        Sanctum::actingAs(User::factory()->create(), [TokenAbility::InvoicesRead->value]);
+
+        $this->getJson(route('v1.invoices.index'))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['student_number']);
+    });
+
+    it('returns 403 when the token lacks the read ability', function () {
+        Sanctum::actingAs(User::factory()->create(), [TokenAbility::InvoicesWrite->value]);
+
+        $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))->assertForbidden();
+    });
+
+    it('returns 401 when no token is provided', function () {
+        $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))->assertUnauthorized();
     });
 });
 
