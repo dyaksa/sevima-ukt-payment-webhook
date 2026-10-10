@@ -34,4 +34,17 @@ class TransactionFactory extends Factory
             'source' => TransactionSource::Webhook,
         ];
     }
+
+    /**
+     * A payment request that expired unpaid: no amount and no payment.
+     */
+    public function expiry(): static
+    {
+        return $this->state(fn (): array => [
+            'idempotency_key' => 'payment_request.expiry:pr-'.Str::uuid(),
+            'kind' => TransactionKind::Expiry,
+            'amount' => null,
+            'gateway_payment_id' => null,
+        ]);
+    }
 }
