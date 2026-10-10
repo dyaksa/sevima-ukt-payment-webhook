@@ -20,24 +20,33 @@ use Illuminate\Validation\Rule;
 class StoreWebhookRequest extends FormRequest
 {
     /**
-     * Get the validation rules that apply to the request.
+     * Get the validation rules that apply to the request. Only the capture
+     * and expiry events are handled so far; later tickets widen the list.
+     * Each event requires the id of its own resource.
      *
      * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
+        $eventName = $this->input('event');
+        $event = is_string($eventName) ? WebhookEvent::fromWireName($eventName) : null;
+        $resourceIdField = $event?->resourceIdField();
+
         return [
-            // Only the capture event is handled so far; later tickets widen this list.
-            'event' => ['required', 'string', Rule::in(WebhookEvent::PaymentCapture->wireNames())],
+            'event' => ['required', 'string', Rule::in([
+                ...WebhookEvent::PaymentCapture->wireNames(),
+                ...WebhookEvent::PaymentRequestExpiry->wireNames(),
+            ])],
             'business_id' => ['required', 'string'],
             'created' => ['required', 'string'],
             'data' => ['required', 'array'],
-            'data.payment_id' => ['required', 'string', 'max:64'],
+            'data.payment_id' => [Rule::requiredIf($resourceIdField === 'payment_id'), 'nullable', 'string', 'max:64'],
+            'data.payment_request_id' => [Rule::requiredIf($resourceIdField === 'payment_request_id'), 'nullable', 'string', 'max:64'],
             'data.reference_id' => ['required', 'string', 'max:64'],
             'data.currency' => ['required', 'string', 'in:IDR'],
             // ISO 8601 with an offset; `p` matches "Z" and `P` matches "+00:00".
             'data.updated' => ['required', 'date_format:Y-m-d\TH:i:sp,Y-m-d\TH:i:s.vp,Y-m-d\TH:i:s.up,Y-m-d\TH:i:sP,Y-m-d\TH:i:s.vP,Y-m-d\TH:i:s.uP'],
-            'data.captures' => ['required', 'array', 'min:1'],
+            'data.captures' => [Rule::requiredIf($event === WebhookEvent::PaymentCapture), 'array', 'min:1'],
             'data.captures.*.capture_amount' => ['required', new IntegerAmount],
         ];
     }
@@ -66,23 +75,25 @@ class StoreWebhookRequest extends FormRequest
     /**
      * The validated notification in the terms of the ledger.
      *
-     * @return array{event: WebhookEvent, idempotency_key: string, invoice_number: string, amount: int, occurred_at: CarbonImmutable, gateway_payment_id: string}
+     * Only a capture carries an amount and a payment; an expiry has neither.
+     *
+     * @return array{event: WebhookEvent, idempotency_key: string, invoice_number: string, amount: ?int, occurred_at: CarbonImmutable, gateway_payment_id: ?string}
      */
     public function notification(): array
     {
         $event = WebhookEvent::fromWireName($this->validated('event'));
-        $paymentId = $this->validated('data.payment_id');
+        $isCapture = $event === WebhookEvent::PaymentCapture;
 
         return [
             'event' => $event,
-            'idempotency_key' => $event->value.':'.$paymentId,
+            'idempotency_key' => $event->value.':'.$this->validated('data.'.$event->resourceIdField()),
             'invoice_number' => $this->validated('data.reference_id'),
-            'amount' => array_sum(array_map(
+            'amount' => $isCapture ? array_sum(array_map(
                 fn (array $capture): int => (int) $capture['capture_amount'],
                 $this->validated('data.captures'),
-            )),
+            )) : null,
             'occurred_at' => CarbonImmutable::parse($this->validated('data.updated')),
-            'gateway_payment_id' => $paymentId,
+            'gateway_payment_id' => $isCapture ? $this->validated('data.payment_id') : null,
         ];
     }
 
