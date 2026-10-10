@@ -242,6 +242,23 @@ describe('payload', function () {
         $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
     });
 
+    it('rejects an identifier with a control character with 422', function (array $payload, string $field) {
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        $payload['data'][$field] .= "\u{0000}junk";
+
+        sendSignedWebhook($institution, $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(["data.{$field}"]);
+
+        $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
+    })->with([
+        'capture reference id' => [capturePayload(), 'reference_id'],
+        'capture payment id' => [capturePayload(), 'payment_id'],
+        'expiry payment request id' => [expiryPayload(), 'payment_request_id'],
+    ]);
+
     it('ignores query string values the signature does not cover', function () {
         $institution = Institution::factory()->create();
         Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
