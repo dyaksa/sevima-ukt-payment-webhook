@@ -51,7 +51,7 @@ Multi-institution backend for tuition (UKT) invoices, one per student per semest
 - Follow the Laravel Boost block below and sibling files. Create files with `php artisan make:`.
 - Core logic has automated tests: HMAC verification, the status function, and institution isolation (institution A cannot read or change institution B's data).
 - One meaningful change per commit; the message explains why.
-- HMAC secrets enter through the environment and `config/`. Seeders and the simulator read `config()`.
+- HMAC secrets live in the database, encrypted, and every runtime reader (webhook verification, the simulator) reads them there. The environment only optionally supplies the seeded institutions' secrets through `config/`; when empty, the seeder generates one and prints it once.
 - Documentation and comments are written in English.
 
 ### Code architecture (Laravel patterns)
@@ -65,6 +65,7 @@ One pattern per task. Before editing, read the matching `rules/*.md` in the `lar
 | Pure logic | The status calculator is a pure Action: it takes an invoice and its transactions and returns a status enum. No queries, no side effects. |
 | Expected outcomes | An Action returns an outcome enum (accepted, duplicate, unmatched) and the controller maps it to an HTTP status. Exceptions cover unexpected failures and rejections (401), rendered by the exception's `render()` method. |
 | Fixed values | Backed enums from `make:enum`, TitleCase cases, cast through `casts()`. |
+| Identifiers | Primary keys are time-ordered UUIDs (UUIDv7) through `HasUuids` and `uuid('id')->primary()`; foreign keys use `foreignUuid`. Exceptions: framework tables (`jobs`, `cache`, `failed_jobs`) and the Sanctum token table's own id, whose `tokenable` morph is still a UUID. |
 | Institution isolation | Model trait plus global scope that reads the institution from the `Context` facade. The policy is the second layer. Read routes use scoped binding, so cross-institution access yields 404. |
 | Data access | Eloquent for domain tables. Explicit ordering with a tie-breaker (`occurred_at`, then `id`). |
 | Data consistency | Unique, foreign key, and CHECK constraints live in the database, because validation cannot close races. Writes run in `DB::transaction` with `lockForUpdate`. |
