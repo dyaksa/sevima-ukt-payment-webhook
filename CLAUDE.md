@@ -57,7 +57,7 @@ Multi-institution backend for tuition (UKT) invoices, one per student per semest
 
 - One branch per ticket, cut from an up-to-date `master`, named by Conventional Branch: `<type>/<description>` in lowercase letters, digits, and hyphens. `feat/` for ticket features, `fix/` for bug fixes, `chore/` for docs, config, and tooling. The ticket number leads the description: `feat/03-student-invoices`.
 - One meaningful change per commit, written as a Conventional Commit: `<type>(<optional scope>): <summary>` with `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `build`, or `ci`; the body explains why. Example: `feat(invoices): list a student's invoices`.
-- When the ticket's tests are green, push the branch and open a pull request to `master` with `gh pr create`: the title uses the same Conventional Commit format, and the body names the ticket and lists what changed, the decisions to review, and the test evidence.
+- When the ticket's tests are green, push the branch and open a pull request to `master` with `gh pr create`: the title uses the same Conventional Commit format, and the body starts with `Closes #<issue>` for the ticket's GitHub issue and lists what changed, the decisions to review, and the test evidence.
 - Merging is the candidate's step, after review. Use a merge commit rather than a squash, so the granular commits stay in `master`'s history.
 
 ### Code architecture (Laravel patterns)
@@ -313,7 +313,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ### Issue tracker
 
-Issues and specs are tracked as local markdown files in `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues and specs are tracked as GitHub Issues in this repo, through the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
