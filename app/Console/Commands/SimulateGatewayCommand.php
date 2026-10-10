@@ -10,7 +10,7 @@ use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 #[Signature('gateway:simulate
-    {scenario : success or bad-signature}
+    {scenario : success, bad-signature, expiry, or retry}
     {institution : Code of the institution that owns the invoice}
     {invoice : Invoice number}
     {--url= : Webhook URL; defaults to this application\'s webhook route}')]
@@ -31,7 +31,7 @@ class SimulateGatewayCommand extends Command
         }
 
         try {
-            $response = $simulateGatewayNotification->handle(
+            $responses = $simulateGatewayNotification->handle(
                 $scenario,
                 $this->argument('institution'),
                 $this->argument('invoice'),
@@ -43,8 +43,10 @@ class SimulateGatewayCommand extends Command
             return self::FAILURE;
         }
 
-        $this->components->info("Webhook answered {$response->status()}.");
-        $this->line($response->body());
+        foreach ($responses as $response) {
+            $this->components->info("Webhook answered {$response->status()}.");
+            $this->line($response->body());
+        }
 
         return self::SUCCESS;
     }

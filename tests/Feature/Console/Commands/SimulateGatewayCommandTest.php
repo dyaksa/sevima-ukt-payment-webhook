@@ -35,6 +35,41 @@ it('sends a capture whose signature does not match in the bad-signature scenario
     Http::assertSent(fn (Request $request) => $request->header('X-Signature') !== [hash_hmac('sha256', $request->body(), $institution->hmac_secret)]);
 });
 
+it('sends a signed payment request expiry in the expiry scenario', function () {
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
+
+    $this->artisan('gateway:simulate', ['scenario' => 'expiry', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
+        ->expectsOutputToContain('200')
+        ->assertSuccessful();
+
+    Http::assertSent(fn (Request $request) => $request->header('X-Signature') === [hash_hmac('sha256', $request->body(), $institution->hmac_secret)]
+        && $request['event'] === 'payment_request.expiry'
+        && $request['data']['reference_id'] === 'INV-2026-0001'
+        && is_string($request['data']['payment_request_id']));
+});
+
+it('sends the same signed capture six times in the retry scenario', function () {
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Http::fake([route('v1.webhooks.store') => Http::sequence()
+        ->push(['outcome' => 'accepted'])
+        ->pushResponse(Http::response(['outcome' => 'duplicate']))
+        ->whenEmpty(Http::response(['outcome' => 'duplicate']))]);
+
+    $this->artisan('gateway:simulate', ['scenario' => 'retry', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
+        ->expectsOutputToContain('accepted')
+        ->expectsOutputToContain('duplicate')
+        ->assertSuccessful();
+
+    $sent = Http::recorded()->map(fn (array $pair) => $pair[0]);
+    expect($sent)->toHaveCount(6)
+        ->and($sent->map(fn (Request $request) => $request->body())->unique())->toHaveCount(1)
+        ->and($sent->first()->header('X-Signature'))->toBe([hash_hmac('sha256', $sent->first()->body(), $institution->hmac_secret)])
+        ->and($sent->first()['event'])->toBe('payment.capture');
+});
+
 it('fails for an invoice the institution does not have', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->create(['invoice_number' => 'INV-2026-0001']);
