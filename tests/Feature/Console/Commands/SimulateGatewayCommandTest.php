@@ -4,10 +4,12 @@ use App\Models\Institution;
 use App\Models\Invoice;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 
 it('sends a capture of the invoice amount signed with the institution secret', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', ['scenario' => 'success', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
@@ -23,9 +25,69 @@ it('sends a capture of the invoice amount signed with the institution secret', f
         && $request['data']['captures'][0]['capture_amount'] === 4_500_000);
 });
 
+it('appends the exact event to the private gateway book before delivering it', function () {
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+    Storage::fake('local');
+    Http::fake(function (Request $request) use ($institution) {
+        Storage::disk('local')->assertExists('gateway-book.jsonl');
+        $entry = json_decode(trim(Storage::disk('local')->get('gateway-book.jsonl')), true, flags: JSON_THROW_ON_ERROR);
+        expect($entry['institution_code'])->toBe($institution->code)
+            ->and($entry['payload'])->toBe(json_decode($request->body(), true, flags: JSON_THROW_ON_ERROR))
+            ->and($entry)->not->toHaveKeys(['signature', 'secret', 'hmac_secret']);
+
+        return Http::response(['outcome' => 'accepted']);
+    });
+
+    $this->artisan('gateway:simulate', ['scenario' => 'success', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
+        ->assertSuccessful();
+
+    Http::assertSentCount(1);
+});
+
+it('keeps earlier book lines and appends every event in each simulator scenario', function (string $scenario, int $events) {
+    Storage::fake('local');
+    Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    $arguments = ['institution' => $institution->code, 'invoice' => 'INV-2026-0001'];
+    $this->artisan('gateway:simulate', ['scenario' => 'success', ...$arguments])->assertSuccessful();
+    $before = Storage::disk('local')->get('gateway-book.jsonl');
+
+    $this->artisan('gateway:simulate', ['scenario' => $scenario, ...$arguments])->assertSuccessful();
+
+    $after = Storage::disk('local')->get('gateway-book.jsonl');
+    expect($after)->toStartWith($before);
+    $entries = array_map(fn (string $line): array => json_decode($line, true, flags: JSON_THROW_ON_ERROR), preg_split('/\R/', trim($after)));
+    expect($entries)->toHaveCount($events + 1);
+})->with([
+    'success' => ['success', 1], 'bad signature' => ['bad-signature', 1], 'expiry' => ['expiry', 1],
+    'retry records the event once' => ['retry', 1], 'wrong amount' => ['wrong-amount', 1],
+    'expiry versus success' => ['expiry-vs-success', 2], 'authorization' => ['authorization-then-success', 2],
+    'failure' => ['failure', 1], 'refund' => ['refund', 2], 'failed refund' => ['refund-failed', 2],
+    'refund before payment' => ['refund-before-payment', 2], 'lost' => ['lost', 1],
+]);
+
+it('records a lost payment without delivering any notification', function () {
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+    Storage::fake('local');
+    Http::fake();
+
+    $this->artisan('gateway:simulate', ['scenario' => 'lost', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
+        ->expectsOutputToContain('Recorded in gateway book without delivery.')
+        ->assertSuccessful();
+
+    Http::assertNothingSent();
+    $entry = json_decode(trim(Storage::disk('local')->get('gateway-book.jsonl')), true, flags: JSON_THROW_ON_ERROR);
+    expect($entry['payload']['event'])->toBe('payment.capture')
+        ->and($entry['payload']['data']['captures'][0]['capture_amount'])->toBe(4_500_000);
+});
+
 it('sends a capture whose signature does not match in the bad-signature scenario', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['message' => 'Invalid signature.'], 401)]);
 
     $this->artisan('gateway:simulate', ['scenario' => 'bad-signature', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
@@ -38,6 +100,7 @@ it('sends a capture whose signature does not match in the bad-signature scenario
 it('sends a signed payment request expiry in the expiry scenario', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', ['scenario' => 'expiry', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
@@ -53,6 +116,7 @@ it('sends a signed payment request expiry in the expiry scenario', function () {
 it('sends the same signed capture six times in the retry scenario', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::sequence()
         ->push(['outcome' => 'accepted'])
         ->whenEmpty(Http::response(['outcome' => 'duplicate']))]);
@@ -64,6 +128,7 @@ it('sends the same signed capture six times in the retry scenario', function () 
 
     Http::assertSentCount(6);
     $sent = Http::recorded()->map(fn (array $pair) => $pair[0]);
+    expect(preg_split('/\R/', trim(Storage::disk('local')->get('gateway-book.jsonl'))))->toHaveCount(1);
     expect($sent->map(fn (Request $request) => $request->body())->unique())->toHaveCount(1)
         ->and($sent->first()->header('X-Signature'))->toBe([hash_hmac('sha256', $sent->first()->body(), $institution->hmac_secret)])
         ->and($sent->first()['event'])->toBe('payment.capture');
@@ -72,6 +137,7 @@ it('sends the same signed capture six times in the retry scenario', function () 
 it('sends an incorrect whole-rupiah capture at the chosen event time', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', [
@@ -90,6 +156,7 @@ it('delivers an expiry after a capture while preserving the earlier expiry event
     $this->travelTo('2026-10-10T10:00:00Z');
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', [
@@ -112,6 +179,7 @@ it('delivers an expiry after a capture while preserving the earlier expiry event
 it('uses a positive mismatched amount when the invoice is one rupiah', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 1]);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', ['scenario' => 'wrong-amount', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
@@ -123,6 +191,7 @@ it('uses a positive mismatched amount when the invoice is one rupiah', function 
 it('delivers authorization then capture for the same payment at distinct event times', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', [
@@ -147,6 +216,7 @@ it('delivers authorization then capture for the same payment at distinct event t
 it('sends a signed failed payment without capture money', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', ['scenario' => 'failure', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
@@ -162,6 +232,7 @@ it('sends a signed failed payment without capture money', function () {
 it('delivers a payment then its signed refund without an invoice reference', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', [
@@ -182,6 +253,7 @@ it('delivers a payment then its signed refund without an invoice reference', fun
 it('delivers a failed refund after its capture without reporting a successful refund', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', ['scenario' => 'refund-failed', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
@@ -199,6 +271,7 @@ it('delivers a failed refund after its capture without reporting a successful re
 it('delivers a refund before its earlier payment for later reconciliation', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::sequence()->push(['outcome' => 'unmatched'], 202)->push(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', [
@@ -220,6 +293,7 @@ it('delivers a refund before its earlier payment for later reconciliation', func
 it('rejects an explicitly empty event time instead of delivering with the current time', function (string $occurredAt) {
     $institution = Institution::factory()->create();
     Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', [
@@ -234,6 +308,7 @@ it('rejects an explicitly empty event time instead of delivering with the curren
 })->with(['empty' => '', 'whitespace' => ' ']);
 
 it('rejects a malformed event time without delivering a notification', function () {
+    Storage::fake('local');
     Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
 
     $this->artisan('gateway:simulate', [
@@ -247,9 +322,35 @@ it('rejects a malformed event time without delivering a notification', function 
     Http::assertNothingSent();
 });
 
+it('rejects simulator event times outside the webhook window before recording them', function (string $occurredAt) {
+    $this->travelTo('2026-10-11T06:00:00Z');
+    Storage::fake('local');
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+
+    $this->artisan('gateway:simulate', [
+        'scenario' => 'lost', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001',
+        '--occurred-at' => $occurredAt,
+    ])->assertFailed();
+
+    Storage::disk('local')->assertMissing('gateway-book.jsonl');
+})->with(['before floor' => '1999-12-31T12:00:00Z', 'beyond skew allowance' => '2026-10-11T07:00:01Z']);
+
+it('does not deliver a webhook when the gateway book cannot be written', function () {
+    Storage::fake('local');
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Storage::disk('local')->makeDirectory('gateway-book.jsonl');
+
+    $this->artisan('gateway:simulate', ['scenario' => 'success', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
+        ->expectsOutputToContain('Cannot append to the gateway book.')
+        ->assertFailed();
+});
+
 it('fails for an invoice the institution does not have', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->create(['invoice_number' => 'INV-2026-0001']);
+    Storage::fake('local');
     Http::fake();
 
     $this->artisan('gateway:simulate', ['scenario' => 'success', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])

@@ -10,9 +10,11 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
+use RuntimeException;
 
 #[Signature('gateway:simulate
-    {scenario : success, bad-signature, expiry, retry, wrong-amount, expiry-vs-success, authorization-then-success, failure, refund, refund-failed, or refund-before-payment}
+    {scenario : success, lost, bad-signature, expiry, retry, wrong-amount, expiry-vs-success, authorization-then-success, failure, refund, refund-failed, or refund-before-payment}
     {institution : Code of the institution that owns the invoice}
     {invoice : Invoice number}
     {--url= : Webhook URL; defaults to this application\'s webhook route}
@@ -56,6 +58,14 @@ class SimulateGatewayCommand extends Command
             $this->components->error("No invoice [{$this->argument('invoice')}] for institution [{$this->argument('institution')}].");
 
             return self::FAILURE;
+        } catch (ValidationException|RuntimeException $exception) {
+            $this->components->error($exception->getMessage());
+
+            return self::FAILURE;
+        }
+
+        if ($scenario === GatewayScenario::Lost) {
+            $this->components->info('Recorded in gateway book without delivery.');
         }
 
         foreach ($responses as $response) {

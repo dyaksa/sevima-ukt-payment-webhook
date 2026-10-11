@@ -7,6 +7,56 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## Gateway book and reconciliation
+
+Every `gateway:simulate` scenario records its events before delivery in the private
+`storage/app/private/gateway-book.jsonl` file. Each line contains `institution_code`
+and the original Xendit-shaped `payload`, never a signature or HMAC secret. Retries
+record one event, not one event per delivery attempt. The `lost` scenario records a
+capture without sending a webhook:
+
+```bash
+vendor/bin/sail artisan gateway:simulate lost UNIV-A INV-2026-0001
+vendor/bin/sail artisan reconcile:run
+vendor/bin/sail artisan reconcile:run --apply
+vendor/bin/sail artisan reconcile:run --hours=72 --apply
+```
+
+The default window is the inclusive interval from 48 hours ago to the command's
+start time, using `data.updated` / `occurred_at`, not delivery time. Dry runs change
+nothing. Reports identify the institution, invoice (when matched), and event key:
+
+- `missing_webhook`: a gateway event absent from the institution's ledger.
+- `missing_gateway_event`: a ledger event absent from that institution's book.
+- `amount_mismatch`: the same event has different gateway and ledger amounts.
+
+Only missing webhooks are applied. They use the normal processing Action, invoice
+row lock, idempotency constraint, audit log, and status calculation, with transaction
+source `reconciliation`. Events are applied in event-time order, so a refund delivered
+before its payment can be recovered. The other differences are logged as warnings
+and require human review; reconciliation never rewrites or deletes ledger rows.
+An event key assigned to a different invoice is reported on both invoice sides
+and never auto-applied; the conflicting ledger assignment needs human review.
+An invalid or unreadable book fails the command instead of silently skipping entries.
+The simulator validates its generated payloads before recording them. Reconciliation
+streams the full JSONL history to validate it, retaining payloads only for the lookback
+window; a rotated or indexed book is the upgrade path when a local mock grows too large.
+Keep the book: it is the mock gateway's append-only source of truth, not a delivery log.
+
+The scheduler runs `reconcile:run --apply` hourly with `withoutOverlapping()`. Start
+the Sail stack and run the scheduler in the foreground while developing:
+
+```bash
+vendor/bin/sail up -d
+vendor/bin/sail artisan schedule:list
+vendor/bin/sail artisan schedule:work
+```
+
+The scheduler uses the application's configured cache store for its overlap lock.
+No queue worker is required. Stop `schedule:work` with Ctrl+C. If a crashed process
+leaves a stale lock, confirm no reconciliation is running before using
+`vendor/bin/sail artisan schedule:clear-cache`.
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

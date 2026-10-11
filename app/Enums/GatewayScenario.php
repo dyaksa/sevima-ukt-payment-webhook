@@ -8,6 +8,7 @@ namespace App\Enums;
 enum GatewayScenario: string
 {
     case Success = 'success';
+    case Lost = 'lost';
     case BadSignature = 'bad-signature';
     case Expiry = 'expiry';
     case Retry = 'retry';

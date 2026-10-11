@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Enums\GatewayScenario;
+use App\GatewayBook;
 use App\Models\Institution;
 use App\Models\Invoice;
 use App\Models\Scopes\InstitutionScope;
@@ -19,6 +20,11 @@ class SimulateGatewayNotification
      * Times Xendit delivers one notification at most: the first try plus its retries.
      */
     private const int XENDIT_DELIVERY_ATTEMPTS = 6;
+
+    public function __construct(
+        private GatewayBook $gatewayBook,
+        private ValidateGatewayNotification $validateGatewayNotification,
+    ) {}
 
     /**
      * Play a gateway scenario for one invoice: build a Xendit-shaped payload,
@@ -38,7 +44,7 @@ class SimulateGatewayNotification
 
         $occurredAt ??= CarbonImmutable::now();
         $payloads = match ($scenario) {
-            GatewayScenario::Success, GatewayScenario::BadSignature => [$this->capturePayload($institution, $invoice, $occurredAt)],
+            GatewayScenario::Success, GatewayScenario::BadSignature, GatewayScenario::Lost => [$this->capturePayload($institution, $invoice, $occurredAt)],
             GatewayScenario::Retry => array_fill(0, self::XENDIT_DELIVERY_ATTEMPTS, $this->capturePayload($institution, $invoice, $occurredAt)),
             GatewayScenario::WrongAmount => [$this->capturePayload($institution, $invoice, $occurredAt, $invoice->amount === 1 ? 2 : $invoice->amount - 1)],
             GatewayScenario::Expiry => [$this->expiryPayload($institution, $invoice, $occurredAt)],
@@ -50,6 +56,18 @@ class SimulateGatewayNotification
             GatewayScenario::Failure => [$this->failurePayload($institution, $invoice, $occurredAt)],
             GatewayScenario::Refund, GatewayScenario::RefundFailed, GatewayScenario::RefundBeforePayment => $this->refundPayloads($institution, $invoice, $occurredAt, $scenario),
         };
+        $events = array_values(array_unique($payloads, SORT_REGULAR));
+
+        foreach ($events as $payload) {
+            $this->validateGatewayNotification->handle($payload);
+        }
+
+        $this->gatewayBook->append($institution->code, $events);
+
+        if ($scenario === GatewayScenario::Lost) {
+            return [];
+        }
+
         $secret = $scenario === GatewayScenario::BadSignature ? Str::random(64) : $institution->hmac_secret;
 
         return array_map(function (array $payload) use ($institution, $secret, $url): Response {
