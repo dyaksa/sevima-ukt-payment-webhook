@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Enums\InvoiceStatus;
+use App\Enums\TransactionAnnotation;
 use App\Enums\TransactionKind;
 use App\Models\Invoice;
 use App\Models\Transaction;
@@ -32,5 +33,35 @@ class CalculateInvoiceStatus
         );
 
         return $hasExpiry ? InvoiceStatus::Expired : InvoiceStatus::Unpaid;
+    }
+
+    /**
+     * Derive annotations from ledger facts without changing or persisting them.
+     *
+     * @param  Collection<int, Transaction>  $transactions
+     * @return array<string, TransactionAnnotation>
+     */
+    public function annotations(Invoice $invoice, Collection $transactions): array
+    {
+        $annotations = [];
+        $hasValidPayment = false;
+
+        $ordered = $transactions->sort(fn (Transaction $left, Transaction $right): int => $left->occurred_at <=> $right->occurred_at ?: strcmp($left->id, $right->id));
+
+        foreach ($ordered as $transaction) {
+            if ($transaction->kind !== TransactionKind::Payment) {
+                continue;
+            }
+
+            if ($transaction->amount !== $invoice->amount) {
+                $annotations[$transaction->id] = TransactionAnnotation::AmountMismatch;
+            } elseif ($hasValidPayment) {
+                $annotations[$transaction->id] = TransactionAnnotation::DuplicatePayment;
+            } else {
+                $hasValidPayment = true;
+            }
+        }
+
+        return $annotations;
     }
 }

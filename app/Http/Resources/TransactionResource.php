@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\TransactionAnnotation;
 use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -11,6 +12,15 @@ use Illuminate\Http\Resources\Json\JsonResource;
  */
 class TransactionResource extends JsonResource
 {
+    private ?TransactionAnnotation $annotation = null;
+
+    public function withAnnotation(?TransactionAnnotation $annotation): static
+    {
+        $this->annotation = $annotation;
+
+        return $this;
+    }
+
     /**
      * Transform the resource into an array.
      *
@@ -20,6 +30,7 @@ class TransactionResource extends JsonResource
     {
         return [
             'kind' => $this->kind,
+            'annotation' => $this->annotation,
             'amount' => $this->amount,
             'occurred_at' => $this->occurred_at->toIso8601String(),
             'gateway_payment_id' => $this->gateway_payment_id,

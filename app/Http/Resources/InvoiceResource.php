@@ -2,7 +2,9 @@
 
 namespace App\Http\Resources;
 
+use App\Actions\CalculateInvoiceStatus;
 use App\Models\Invoice;
+use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -26,7 +28,11 @@ class InvoiceResource extends JsonResource
             'status' => $this->status,
             'expires_at' => $this->expires_at->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
-            'transactions' => TransactionResource::collection($this->whenLoaded('transactions')),
+            'transactions' => $this->whenLoaded('transactions', function () {
+                $annotations = (new CalculateInvoiceStatus)->annotations($this->resource, $this->transactions);
+
+                return $this->transactions->map(fn (Transaction $transaction): TransactionResource => (new TransactionResource($transaction))->withAnnotation($annotations[$transaction->id] ?? null));
+            }),
         ];
     }
 }
