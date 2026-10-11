@@ -242,6 +242,54 @@ describe('payload', function () {
         $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
     });
 
+    it('rejects an event time PostgreSQL cannot store with 422', function () {
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, capturePayload(['updated' => '0000-01-01T00:00:00Z']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['data.updated']);
+
+        $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
+    });
+
+    it('rejects an identifier with a control character with 422', function (array $payload, string $field) {
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        $payload['data'][$field] .= "\u{0000}junk";
+
+        sendSignedWebhook($institution, $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(["data.{$field}"]);
+
+        $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
+    })->with([
+        'capture reference id' => [capturePayload(), 'reference_id'],
+        'capture payment id' => [capturePayload(), 'payment_id'],
+        'expiry payment request id' => [expiryPayload(), 'payment_request_id'],
+    ]);
+
+    it('ignores query string values the signature does not cover', function () {
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        $payload = capturePayload();
+        unset($payload['event']);
+        $body = json_encode($payload);
+
+        test()->call('POST', route('v1.webhooks.store', ['event' => 'payment.capture']), server: [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_ACCEPT' => 'application/json',
+            'HTTP_X_INSTITUTION_CODE' => $institution->code,
+            'HTTP_X_SIGNATURE' => hash_hmac('sha256', $body, $institution->hmac_secret),
+        ], content: $body)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['event']);
+
+        $this->assertDatabaseCount('transactions', 0);
+    });
+
     it('accepts the brief alias payment.success as a capture', function () {
         $institution = Institution::factory()->create();
         $invoice = Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);

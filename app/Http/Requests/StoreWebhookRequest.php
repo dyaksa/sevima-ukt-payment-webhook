@@ -20,15 +20,33 @@ use Illuminate\Validation\Rule;
 class StoreWebhookRequest extends FormRequest
 {
     /**
+     * Identifiers are matched and stored in PostgreSQL, whose driver cuts a
+     * bound value at the first NUL byte, so control characters are refused.
+     */
+    private const string NO_CONTROL_CHARACTERS = 'not_regex:/[\x00-\x1F\x7F]/';
+
+    /**
+     * Validate only the signed JSON body; the query string is not covered by
+     * the signature, so it must not fill in missing keys.
+     *
+     * @return array<string, mixed>
+     */
+    public function validationData(): array
+    {
+        return $this->json()->all();
+    }
+
+    /**
      * Get the validation rules that apply to the request. Only the capture
      * and expiry events are handled so far; later tickets widen the list.
-     * Each event requires the id of its own resource.
+     * Each event requires the id of its own resource. The event time has a
+     * lower bound so every accepted value fits PostgreSQL's timestamp range.
      *
      * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
-        $eventName = $this->input('event');
+        $eventName = $this->json('event');
         $event = is_string($eventName) ? WebhookEvent::fromWireName($eventName) : null;
         $resourceIdField = $event?->resourceIdField();
 
@@ -40,12 +58,12 @@ class StoreWebhookRequest extends FormRequest
             'business_id' => ['required', 'string'],
             'created' => ['required', 'string'],
             'data' => ['required', 'array'],
-            'data.payment_id' => [Rule::requiredIf($resourceIdField === 'payment_id'), 'nullable', 'string', 'max:64'],
-            'data.payment_request_id' => [Rule::requiredIf($resourceIdField === 'payment_request_id'), 'nullable', 'string', 'max:64'],
-            'data.reference_id' => ['required', 'string', 'max:64'],
+            'data.payment_id' => [Rule::requiredIf($resourceIdField === 'payment_id'), 'nullable', 'string', 'max:64', self::NO_CONTROL_CHARACTERS],
+            'data.payment_request_id' => [Rule::requiredIf($resourceIdField === 'payment_request_id'), 'nullable', 'string', 'max:64', self::NO_CONTROL_CHARACTERS],
+            'data.reference_id' => ['required', 'string', 'max:64', self::NO_CONTROL_CHARACTERS],
             'data.currency' => ['required', 'string', 'in:IDR'],
             // ISO 8601 with an offset; `p` matches "Z" and `P` matches "+00:00".
-            'data.updated' => ['required', 'date_format:Y-m-d\TH:i:sp,Y-m-d\TH:i:s.vp,Y-m-d\TH:i:s.up,Y-m-d\TH:i:sP,Y-m-d\TH:i:s.vP,Y-m-d\TH:i:s.uP'],
+            'data.updated' => ['required', 'date_format:Y-m-d\TH:i:sp,Y-m-d\TH:i:s.vp,Y-m-d\TH:i:s.up,Y-m-d\TH:i:sP,Y-m-d\TH:i:s.vP,Y-m-d\TH:i:s.uP', 'after:2000-01-01'],
             'data.captures' => [Rule::requiredIf($event === WebhookEvent::PaymentCapture), 'array', 'min:1'],
             'data.captures.*.capture_amount' => ['required', new IntegerAmount],
         ];
