@@ -68,6 +68,50 @@ it('derives the status from the invoice amount and its ledger', function (Closur
         fn () => [Transaction::factory()->withoutParents()->make(['amount' => 4_500_000]), Transaction::factory()->withoutParents()->make(['amount' => 4_500_000])],
         InvoiceStatus::Paid,
     ],
+    'authorization is informational' => [
+        fn () => [ledgerTransaction(['a1', null, '2026-10-10T08:00:00Z', TransactionKind::Pending])],
+        InvoiceStatus::Unpaid,
+    ],
+    'a failed attempt cannot lower paid' => [
+        fn () => [ledgerTransaction(['p1', 4_500_000, '2026-10-10T08:00:00Z']), ledgerTransaction(['f1', null, '2026-10-10T09:00:00Z', TransactionKind::FailedPayment])],
+        InvoiceStatus::Paid,
+    ],
+    'a full refund' => [
+        fn () => [ledgerTransaction(['p1', 4_500_000, '2026-10-10T08:00:00Z']), ledgerTransaction(['r1', 4_500_000, '2026-10-10T09:00:00Z', TransactionKind::Refund])],
+        InvoiceStatus::Refunded,
+    ],
+    'a refund above the invoice amount' => [
+        fn () => [ledgerTransaction(['p1', 4_500_000, '2026-10-10T08:00:00Z']), ledgerTransaction(['r1', 5_000_000, '2026-10-10T09:00:00Z', TransactionKind::Refund])],
+        InvoiceStatus::Refunded,
+    ],
+    'a partial refund' => [
+        fn () => [ledgerTransaction(['p1', 4_500_000, '2026-10-10T08:00:00Z']), ledgerTransaction(['r1', 500_000, '2026-10-10T09:00:00Z', TransactionKind::Refund])],
+        InvoiceStatus::Paid,
+    ],
+    'cumulative refunds reach the invoice amount' => [
+        fn () => [ledgerTransaction(['p1', 4_500_000, '2026-10-10T08:00:00Z']), ledgerTransaction(['r1', 4_000_000, '2026-10-10T09:00:00Z', TransactionKind::Refund]), ledgerTransaction(['r2', 500_000, '2026-10-10T10:00:00Z', TransactionKind::Refund])],
+        InvoiceStatus::Refunded,
+    ],
+    'large refunds cannot overflow into paid' => [
+        fn () => [ledgerTransaction(['r2', PHP_INT_MAX, '2026-10-10T10:00:00Z', TransactionKind::Refund]), ledgerTransaction(['r1', PHP_INT_MAX, '2026-10-10T09:00:00Z', TransactionKind::Refund]), ledgerTransaction(['p1', 4_500_000, '2026-10-10T08:00:00Z'])],
+        InvoiceStatus::Refunded,
+    ],
+    'a failed refund does not count' => [
+        fn () => [ledgerTransaction(['p1', 4_500_000, '2026-10-10T08:00:00Z']), ledgerTransaction(['r1', 4_500_000, '2026-10-10T09:00:00Z', TransactionKind::FailedRefund])],
+        InvoiceStatus::Paid,
+    ],
+    'a refund without an exact payment' => [
+        fn () => [ledgerTransaction(['p1', 4_000_000, '2026-10-10T08:00:00Z']), ledgerTransaction(['r1', 4_500_000, '2026-10-10T09:00:00Z', TransactionKind::Refund])],
+        InvoiceStatus::Unpaid,
+    ],
+    'a later success cannot reopen a refunded invoice' => [
+        fn () => [ledgerTransaction(['p1', 4_500_000, '2026-10-10T08:00:00Z']), ledgerTransaction(['r1', 4_500_000, '2026-10-10T09:00:00Z', TransactionKind::Refund]), ledgerTransaction(['p2', 4_500_000, '2026-10-10T10:00:00Z'])],
+        InvoiceStatus::Refunded,
+    ],
+    'a payment delivered after its refund' => [
+        fn () => [ledgerTransaction(['r1', 4_500_000, '2026-10-10T09:00:00Z', TransactionKind::Refund]), ledgerTransaction(['p1', 4_500_000, '2026-10-10T08:00:00Z'])],
+        InvoiceStatus::Refunded,
+    ],
 ]);
 
 it('leaves ledger facts and collection order unchanged when deriving annotations', function () {
@@ -115,5 +159,17 @@ it('derives payment annotations in event order with ids breaking ties', function
     'expiry is not a payment' => [[
         ['e1', null, '2026-10-10T08:00:00Z', TransactionKind::Expiry],
         ['p1', 4_500_000, '2026-10-10T09:00:00Z'],
+    ], []],
+    'partial refund requires review' => [[
+        ['p1', 4_500_000, '2026-10-10T08:00:00Z'],
+        ['r1', 500_000, '2026-10-10T09:00:00Z', TransactionKind::Refund],
+    ], ['r1' => TransactionAnnotation::NeedsReview]],
+    'full refund has no partial annotation' => [[
+        ['p1', 4_500_000, '2026-10-10T08:00:00Z'],
+        ['r1', 4_500_000, '2026-10-10T09:00:00Z', TransactionKind::Refund],
+    ], []],
+    'a failed refund has no partial annotation' => [[
+        ['p1', 4_500_000, '2026-10-10T08:00:00Z'],
+        ['r1', 500_000, '2026-10-10T09:00:00Z', TransactionKind::FailedRefund],
     ], []],
 ]);

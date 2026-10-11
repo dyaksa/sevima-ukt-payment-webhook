@@ -58,6 +58,32 @@ function expiryPayload(array $data = [], string $event = 'payment_request.expiry
 }
 
 /**
+ * A Xendit-shaped refund linked to a payment, not an invoice number.
+ *
+ * @param  array<string, mixed>  $data
+ * @return array<string, mixed>
+ */
+function refundPayload(array $data = [], string $event = 'refund.succeeded'): array
+{
+    return [
+        'event' => $event,
+        'business_id' => 'UNIV-A',
+        'created' => '2026-10-10T09:00:01.000Z',
+        'data' => [
+            'id' => 'rf-0001',
+            'payment_id' => 'py-0001',
+            'currency' => 'IDR',
+            'amount' => 4_500_000,
+            'status' => 'SUCCEEDED',
+            'reason' => 'REQUESTED_BY_CUSTOMER',
+            'failure_code' => null,
+            'updated' => '2026-10-10T09:00:00.000Z',
+            ...$data,
+        ],
+    ];
+}
+
+/**
  * Post a raw body to the webhook, signed with the given secret (by default the
  * institution's own), exactly as the gateway sends it.
  */
@@ -184,6 +210,16 @@ describe('payload', function () {
         'decimal string' => '"4500000.00"',
     ]);
 
+    it('rejects a fractional refund amount with 422 and audits the rejection', function () {
+        $institution = Institution::factory()->create();
+        $body = str_replace('"amount":4500000', '"amount":4500000.5', json_encode(refundPayload()));
+
+        sendSignedWebhook($institution, $body)->assertUnprocessable()->assertJsonValidationErrors('data.amount');
+
+        $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid', 'raw_body' => $body]);
+    });
+
     it('records the event time from data.updated in any ISO 8601 offset', function (string $updated, string $expected) {
         $user = User::factory()->create();
         Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
@@ -228,6 +264,10 @@ describe('payload', function () {
         'capture without a payment id' => [capturePayload(), 'payment_id'],
         'capture without captures' => [capturePayload(), 'captures'],
         'expiry without a payment request id' => [expiryPayload(), 'payment_request_id'],
+        'refund without a refund id' => [refundPayload(), 'id'],
+        'refund without a payment id' => [refundPayload(), 'payment_id'],
+        'refund without an amount' => [refundPayload(), 'amount'],
+        'failed refund without a refund id' => [refundPayload(event: 'refund.failed'), 'id'],
     ]);
 
     it('rejects an event name that is not a string with 422 and logs it', function () {
@@ -293,7 +333,18 @@ describe('payload', function () {
         'unit separator in capture reference id' => [capturePayload(), 'reference_id', "\u{001F}"],
         'NUL in capture payment id' => [capturePayload(), 'payment_id', "\u{0000}"],
         'NUL in expiry payment request id' => [expiryPayload(), 'payment_request_id', "\u{0000}"],
+        'NUL in refund id' => [refundPayload(), 'id', "\u{0000}"],
     ]);
+
+    it('rejects a refund id longer than 64 characters with 422', function () {
+        $institution = Institution::factory()->create();
+
+        sendSignedWebhook($institution, refundPayload(['id' => str_repeat('r', 65)]))
+            ->assertUnprocessable()->assertJsonValidationErrors('data.id');
+
+        $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
+    });
 
     it('ignores query string values the signature does not cover', function () {
         $institution = Institution::factory()->create();
@@ -413,6 +464,189 @@ describe('event order and anomalies', function () {
 });
 
 describe('processing', function () {
+    it('records an informational payment event without paying the invoice', function (string $event, string $kind) {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        $payload = capturePayload();
+        $payload['event'] = $event;
+        unset($payload['data']['captures']);
+
+        sendSignedWebhook($user->institution, $payload)->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()
+            ->assertJsonPath('data.status', 'unpaid')
+            ->assertJsonCount(1, 'data.transactions')
+            ->assertJsonPath('data.transactions.0.kind', $kind)
+            ->assertJsonPath('data.transactions.0.amount', null)
+            ->assertJsonPath('data.transactions.0.gateway_payment_id', 'py-0001');
+    })->with([
+        'authorization' => ['payment.authorization', 'pending'],
+        'pending alias' => ['payment.pending', 'pending'],
+        'failed attempt' => ['payment.failure', 'failed_payment'],
+    ]);
+
+    it('accepts a capture after authorization for the same payment without treating it as a retry', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        $authorization = capturePayload(['updated' => '2026-10-10T07:00:00Z']);
+        $authorization['event'] = 'payment.authorization';
+        unset($authorization['data']['captures']);
+
+        sendSignedWebhook($user->institution, $authorization)->assertOk()->assertJson(['outcome' => 'accepted']);
+        sendSignedWebhook($user->institution, capturePayload())->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()->assertJsonPath('data.status', 'paid')->assertJsonCount(2, 'data.transactions')
+            ->assertJsonPath('data.transactions.0.kind', 'pending')
+            ->assertJsonPath('data.transactions.1.kind', 'payment')
+            ->assertJsonPath('data.transactions.1.annotation', null);
+    });
+
+    it('marks a paid invoice refunded through its payment id and keeps it final', function (string $event) {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        sendSignedWebhook($user->institution, capturePayload())->assertOk();
+
+        sendSignedWebhook($user->institution, refundPayload(event: $event))->assertOk()->assertJson(['outcome' => 'accepted']);
+        sendSignedWebhook($user->institution, capturePayload(['payment_id' => 'py-late', 'updated' => '2026-10-10T10:00:00Z']))->assertOk();
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()
+            ->assertJsonPath('data.status', 'refunded')
+            ->assertJsonCount(3, 'data.transactions')
+            ->assertJsonPath('data.transactions.1.kind', 'refund')
+            ->assertJsonPath('data.transactions.1.amount', 4_500_000)
+            ->assertJsonPath('data.transactions.1.gateway_payment_id', 'py-0001')
+            ->assertJsonPath('data.transactions.1.idempotency_key', 'refund.succeeded:rf-0001')
+            ->assertJsonPath('data.transactions.1.annotation', null)
+            ->assertJsonPath('data.transactions.2.annotation', 'duplicate_payment');
+    })->with(['wire name' => 'refund.succeeded', 'brief alias' => 'payment.refunded']);
+
+    it('flags a partial refund for review without changing the paid status', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        sendSignedWebhook($user->institution, capturePayload())->assertOk();
+
+        sendSignedWebhook($user->institution, refundPayload(['amount' => 500_000]))->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()
+            ->assertJsonPath('data.status', 'paid')
+            ->assertJsonCount(2, 'data.transactions')
+            ->assertJsonPath('data.transactions.1.kind', 'refund')
+            ->assertJsonPath('data.transactions.1.amount', 500_000)
+            ->assertJsonPath('data.transactions.1.annotation', 'needs_review');
+    });
+
+    it('accumulates distinct refunds for one payment but counts each refund once', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        sendSignedWebhook($user->institution, capturePayload())->assertOk();
+        $partial = refundPayload(['amount' => 4_000_000]);
+
+        sendSignedWebhook($user->institution, $partial)->assertOk()->assertJson(['outcome' => 'accepted']);
+        sendSignedWebhook($user->institution, $partial)->assertOk()->assertJson(['outcome' => 'duplicate']);
+        sendSignedWebhook($user->institution, refundPayload(['id' => 'rf-0002', 'amount' => '500000', 'updated' => '2026-10-10T10:00:00Z']))
+            ->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()->assertJsonPath('data.status', 'refunded')->assertJsonCount(3, 'data.transactions')
+            ->assertJsonPath('data.transactions.1.amount', 4_000_000)
+            ->assertJsonPath('data.transactions.2.amount', 500_000);
+    });
+
+    it('records a failed refund without changing the paid invoice', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        sendSignedWebhook($user->institution, capturePayload())->assertOk();
+
+        sendSignedWebhook($user->institution, refundPayload(['status' => 'FAILED', 'failure_code' => 'REJECTED'], 'refund.failed'))
+            ->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()
+            ->assertJsonPath('data.status', 'paid')
+            ->assertJsonCount(2, 'data.transactions')
+            ->assertJsonPath('data.transactions.1.kind', 'failed_refund')
+            ->assertJsonPath('data.transactions.1.amount', 4_500_000)
+            ->assertJsonPath('data.transactions.1.annotation', null);
+    });
+
+    it('returns 202 and audits a refund whose payment has not arrived', function () {
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+
+        sendSignedWebhook($institution, refundPayload())
+            ->assertAccepted()
+            ->assertJson(['outcome' => 'unmatched']);
+
+        $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', [
+            'institution_id' => $institution->id,
+            'outcome' => 'unmatched',
+            'event' => 'refund.succeeded',
+            'idempotency_key' => 'refund.succeeded:rf-0001',
+            'invoice_number' => null,
+        ]);
+    });
+
+    it('returns 202 for a payment id belonging only to another institution', function () {
+        $otherUser = User::factory()->create();
+        Invoice::factory()->for($otherUser->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        sendSignedWebhook($otherUser->institution, capturePayload())->assertOk();
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, refundPayload(['reference_id' => 'INV-2026-0001', 'institution_id' => $otherUser->institution_id]))
+            ->assertAccepted()->assertJson(['outcome' => 'unmatched']);
+
+        $this->assertDatabaseCount('transactions', 1);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'unmatched']);
+        Sanctum::actingAs($otherUser, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()->assertJsonPath('data.status', 'paid')->assertJsonCount(1, 'data.transactions');
+    });
+
+    it('refunds only the signing institution when both share a gateway payment id', function () {
+        $otherUser = User::factory()->create();
+        Invoice::factory()->for($otherUser->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        sendSignedWebhook($otherUser->institution, capturePayload())->assertOk();
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        sendSignedWebhook($user->institution, capturePayload())->assertOk();
+
+        sendSignedWebhook($user->institution, refundPayload())->assertOk()->assertJson(['outcome' => 'accepted']);
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()->assertJsonPath('data.status', 'refunded')->assertJsonCount(2, 'data.transactions');
+        Sanctum::actingAs($otherUser, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()->assertJsonPath('data.status', 'paid')->assertJsonCount(1, 'data.transactions');
+    });
+
+    it('retries an unmatched refund after its payment arrives without losing or duplicating it', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($user->institution, refundPayload())->assertAccepted()->assertJson(['outcome' => 'unmatched']);
+        sendSignedWebhook($user->institution, capturePayload())->assertOk();
+        sendSignedWebhook($user->institution, refundPayload())->assertOk()->assertJson(['outcome' => 'accepted']);
+        sendSignedWebhook($user->institution, refundPayload(event: 'payment.refunded'))->assertOk()->assertJson(['outcome' => 'duplicate']);
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()->assertJsonPath('data.status', 'refunded')->assertJsonCount(2, 'data.transactions');
+        $this->assertDatabaseCount('webhook_logs', 4);
+    });
+
     it('cannot touch another institution invoice and answers 202 as unmatched', function () {
         $institution = Institution::factory()->create();
         $otherInvoice = Invoice::factory()->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);

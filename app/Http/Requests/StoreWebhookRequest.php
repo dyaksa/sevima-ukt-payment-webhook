@@ -32,8 +32,7 @@ class StoreWebhookRequest extends FormRequest
     }
 
     /**
-     * Get the validation rules that apply to the request. Only the capture
-     * and expiry events are handled so far; later tickets widen the list.
+     * Get the validation rules that apply to the request.
      * Each event requires the id of its own resource. The event time has a
      * lower bound so every accepted value fits PostgreSQL's timestamp range,
      * and may run at most one hour ahead of this clock (skew allowance), so a
@@ -46,21 +45,28 @@ class StoreWebhookRequest extends FormRequest
         $eventName = $this->json('event');
         $event = is_string($eventName) ? WebhookEvent::fromWireName($eventName) : null;
         $resourceIdField = $event?->resourceIdField();
+        $isRefund = $resourceIdField === 'id';
 
         return [
             'event' => ['required', 'string', Rule::in([
+                ...WebhookEvent::PaymentAuthorization->wireNames(),
                 ...WebhookEvent::PaymentCapture->wireNames(),
+                ...WebhookEvent::PaymentFailure->wireNames(),
                 ...WebhookEvent::PaymentRequestExpiry->wireNames(),
+                ...WebhookEvent::RefundSucceeded->wireNames(),
+                ...WebhookEvent::RefundFailed->wireNames(),
             ])],
             'business_id' => ['required', 'string'],
             'created' => ['required', 'string'],
             'data' => ['required', 'array'],
-            'data.payment_id' => [Rule::requiredIf($resourceIdField === 'payment_id'), 'nullable', new Identifier, 'max:64'],
+            'data.id' => [Rule::requiredIf($isRefund), 'nullable', new Identifier, 'max:64'],
+            'data.payment_id' => [Rule::requiredIf($resourceIdField === 'payment_id' || $isRefund), 'nullable', new Identifier, 'max:64'],
             'data.payment_request_id' => [Rule::requiredIf($resourceIdField === 'payment_request_id'), 'nullable', new Identifier, 'max:64'],
-            'data.reference_id' => ['required', new Identifier, 'max:64'],
+            'data.reference_id' => [Rule::requiredIf(! $isRefund), 'nullable', new Identifier, 'max:64'],
             'data.currency' => ['required', 'string', 'in:IDR'],
             // ISO 8601 with an offset; `p` matches "Z" and `P` matches "+00:00".
             'data.updated' => ['required', 'date_format:Y-m-d\TH:i:sp,Y-m-d\TH:i:s.vp,Y-m-d\TH:i:s.up,Y-m-d\TH:i:sP,Y-m-d\TH:i:s.vP,Y-m-d\TH:i:s.uP', 'after:2000-01-01', 'before_or_equal:'.now()->addHour()->toIso8601String()],
+            'data.amount' => [Rule::requiredIf($isRefund), new IntegerAmount],
             'data.captures' => [Rule::requiredIf($event === WebhookEvent::PaymentCapture), 'array', 'min:1'],
             'data.captures.*.capture_amount' => ['required', new IntegerAmount],
         ];
@@ -90,25 +96,30 @@ class StoreWebhookRequest extends FormRequest
     /**
      * The validated notification in the terms of the ledger.
      *
-     * Only a capture carries an amount and a payment; an expiry has neither.
+     * Captures and refunds carry amounts; informational events carry no money.
+     * Refunds identify the invoice through the payment, never a reference id.
      *
-     * @return array{event: WebhookEvent, idempotency_key: string, invoice_number: string, amount: ?int, occurred_at: CarbonImmutable, gateway_payment_id: ?string}
+     * @return array{event: WebhookEvent, idempotency_key: string, invoice_number: ?string, amount: ?int, occurred_at: CarbonImmutable, gateway_payment_id: ?string}
      */
     public function notification(): array
     {
         $event = WebhookEvent::fromWireName($this->validated('event'));
-        $isCapture = $event === WebhookEvent::PaymentCapture;
+        $isRefund = $event->resourceIdField() === 'id';
 
         return [
             'event' => $event,
             'idempotency_key' => $event->value.':'.$this->validated('data.'.$event->resourceIdField()),
-            'invoice_number' => $this->validated('data.reference_id'),
-            'amount' => $isCapture ? array_sum(array_map(
-                fn (array $capture): int => (int) $capture['capture_amount'],
-                $this->validated('data.captures'),
-            )) : null,
+            'invoice_number' => $isRefund ? null : $this->validated('data.reference_id'),
+            'amount' => match ($event) {
+                WebhookEvent::PaymentCapture => array_sum(array_map(
+                    fn (array $capture): int => (int) $capture['capture_amount'],
+                    $this->validated('data.captures'),
+                )),
+                WebhookEvent::RefundSucceeded, WebhookEvent::RefundFailed => (int) $this->validated('data.amount'),
+                default => null,
+            },
             'occurred_at' => CarbonImmutable::parse($this->validated('data.updated')),
-            'gateway_payment_id' => $isCapture ? $this->validated('data.payment_id') : null,
+            'gateway_payment_id' => $event === WebhookEvent::PaymentRequestExpiry ? null : $this->validated('data.payment_id'),
         ];
     }
 

@@ -46,6 +46,9 @@ class SimulateGatewayNotification
                 $this->capturePayload($institution, $invoice, $occurredAt),
                 $this->expiryPayload($institution, $invoice, $occurredAt->subSecond()),
             ],
+            GatewayScenario::AuthorizationThenSuccess => $this->authorizationPayloads($institution, $invoice, $occurredAt),
+            GatewayScenario::Failure => [$this->failurePayload($institution, $invoice, $occurredAt)],
+            GatewayScenario::Refund, GatewayScenario::RefundFailed, GatewayScenario::RefundBeforePayment => $this->refundPayloads($institution, $invoice, $occurredAt, $scenario),
         };
         $secret = $scenario === GatewayScenario::BadSignature ? Str::random(64) : $institution->hmac_secret;
 
@@ -61,6 +64,61 @@ class SimulateGatewayNotification
                 ->acceptJson()
                 ->post($url);
         }, $payloads);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function authorizationPayloads(Institution $institution, Invoice $invoice, CarbonImmutable $occurredAt): array
+    {
+        $capture = $this->capturePayload($institution, $invoice, $occurredAt);
+        $authorization = $capture;
+        $authorization['event'] = 'payment.authorization';
+        $authorization['data']['status'] = 'AUTHORIZED';
+        $authorization['data']['updated'] = $occurredAt->subSecond()->utc()->format('Y-m-d\TH:i:s.up');
+        unset($authorization['data']['captures']);
+
+        return [$authorization, $capture];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function failurePayload(Institution $institution, Invoice $invoice, CarbonImmutable $occurredAt): array
+    {
+        $payload = $this->capturePayload($institution, $invoice, $occurredAt);
+        $payload['event'] = 'payment.failure';
+        $payload['data']['status'] = 'FAILED';
+        unset($payload['data']['captures']);
+
+        return $payload;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function refundPayloads(Institution $institution, Invoice $invoice, CarbonImmutable $occurredAt, GatewayScenario $scenario): array
+    {
+        $capture = $this->capturePayload($institution, $invoice, $occurredAt->subSecond());
+        $failed = $scenario === GatewayScenario::RefundFailed;
+        $now = $occurredAt->utc()->format('Y-m-d\TH:i:s.up');
+        $refund = [
+            'event' => $failed ? 'refund.failed' : 'refund.succeeded',
+            'business_id' => $institution->code,
+            'created' => $now,
+            'data' => [
+                'id' => 'rf-'.Str::uuid(),
+                'payment_id' => $capture['data']['payment_id'],
+                'currency' => 'IDR',
+                'amount' => $invoice->amount,
+                'status' => $failed ? 'FAILED' : 'SUCCEEDED',
+                'reason' => 'REQUESTED_BY_CUSTOMER',
+                'failure_code' => $failed ? 'REJECTED' : null,
+                'updated' => $now,
+            ],
+        ];
+
+        return $scenario === GatewayScenario::RefundBeforePayment ? [$refund, $capture] : [$capture, $refund];
     }
 
     /**

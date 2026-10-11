@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Validator;
 
 #[Signature('gateway:simulate
-    {scenario : success, bad-signature, expiry, retry, wrong-amount, or expiry-vs-success}
+    {scenario : success, bad-signature, expiry, retry, wrong-amount, expiry-vs-success, authorization-then-success, failure, refund, refund-failed, or refund-before-payment}
     {institution : Code of the institution that owns the invoice}
     {invoice : Invoice number}
     {--url= : Webhook URL; defaults to this application\'s webhook route}

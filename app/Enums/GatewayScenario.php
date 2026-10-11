@@ -13,4 +13,9 @@ enum GatewayScenario: string
     case Retry = 'retry';
     case WrongAmount = 'wrong-amount';
     case ExpiryVsSuccess = 'expiry-vs-success';
+    case AuthorizationThenSuccess = 'authorization-then-success';
+    case Failure = 'failure';
+    case Refund = 'refund';
+    case RefundFailed = 'refund-failed';
+    case RefundBeforePayment = 'refund-before-payment';
 }
