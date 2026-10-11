@@ -9,6 +9,7 @@ use App\Models\Institution;
 use App\Models\Invoice;
 use App\Models\Transaction;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -25,7 +26,7 @@ class ProcessWebhookNotification
      * If anything fails, the transaction rolls back and an `error` audit row
      * is written on its own.
      *
-     * @param  array{event: WebhookEvent, idempotency_key: string, invoice_number: string, amount: ?int, occurred_at: CarbonImmutable, gateway_payment_id: ?string}  $notification
+     * @param  array{event: WebhookEvent, idempotency_key: string, invoice_number: ?string, amount: ?int, occurred_at: CarbonImmutable, gateway_payment_id: ?string}  $notification
      *
      * @throws Throwable
      */
@@ -55,14 +56,19 @@ class ProcessWebhookNotification
      * Lock the invoice, append the ledger row unless its idempotency key is
      * already there, and store the status derived from the whole ledger.
      *
-     * @param  array{event: WebhookEvent, idempotency_key: string, invoice_number: string, amount: ?int, occurred_at: CarbonImmutable, gateway_payment_id: ?string}  $notification
+     * @param  array{event: WebhookEvent, idempotency_key: string, invoice_number: ?string, amount: ?int, occurred_at: CarbonImmutable, gateway_payment_id: ?string}  $notification
      */
     private function record(Institution $institution, array $notification): WebhookOutcome
     {
-        $invoice = Invoice::query()
-            ->where('invoice_number', $notification['invoice_number'])
-            ->lockForUpdate()
-            ->first();
+        $query = Invoice::query();
+
+        if ($notification['event']->resourceIdField() === 'id') {
+            $query->whereHas('transactions', fn (Builder $query) => $query->where('gateway_payment_id', $notification['gateway_payment_id']));
+        } else {
+            $query->where('invoice_number', $notification['invoice_number']);
+        }
+
+        $invoice = $query->lockForUpdate()->first();
 
         if ($invoice === null) {
             return WebhookOutcome::Unmatched;

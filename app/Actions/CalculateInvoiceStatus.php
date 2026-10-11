@@ -25,6 +25,19 @@ class CalculateInvoiceStatus
         );
 
         if ($hasValidPayment) {
+            $remaining = $invoice->amount;
+
+            foreach ($transactions as $transaction) {
+                if ($transaction->kind === TransactionKind::Refund) {
+                    // Cap at the balance so cumulative refunds never overflow integer rupiah.
+                    $remaining -= min($remaining, $transaction->amount);
+
+                    if ($remaining === 0) {
+                        return InvoiceStatus::Refunded;
+                    }
+                }
+            }
+
             return InvoiceStatus::Paid;
         }
 
@@ -49,6 +62,10 @@ class CalculateInvoiceStatus
         $ordered = $transactions->sort(fn (Transaction $left, Transaction $right): int => $left->occurred_at <=> $right->occurred_at ?: strcmp($left->id, $right->id));
 
         foreach ($ordered as $transaction) {
+            if ($transaction->kind === TransactionKind::Refund && $transaction->amount < $invoice->amount) {
+                $annotations[$transaction->id] = TransactionAnnotation::NeedsReview;
+            }
+
             if ($transaction->kind !== TransactionKind::Payment) {
                 continue;
             }
