@@ -3,6 +3,7 @@
 use App\Enums\TokenAbility;
 use App\Http\Controllers\Api\V1\InvoiceController;
 use App\Http\Controllers\Api\V1\WebhookController;
+use App\Rules\Identifier;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->name('v1.')->middleware(['auth:sanctum', 'institution'])->group(function () {
@@ -15,6 +16,7 @@ Route::prefix('v1')->name('v1.')->middleware(['auth:sanctum', 'institution'])->g
         ->name('invoices.store');
 
     Route::get('invoices/{invoice:invoice_number}', [InvoiceController::class, 'show'])
+        ->where('invoice', Identifier::PATTERN)
         ->middleware(TokenAbility::InvoicesRead->middleware())
         ->name('invoices.show');
 });

@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Scopes\InstitutionScope;
+use App\Rules\Identifier;
 use App\Rules\IntegerAmount;
 use App\Rules\SemesterCode;
 use Illuminate\Contracts\Validation\ValidationRule;
@@ -25,12 +26,13 @@ class StoreInvoiceRequest extends FormRequest
     {
         return [
             'invoice_number' => [
+                'bail',
                 'required',
-                'string',
+                new Identifier,
                 'max:64',
                 Rule::unique('invoices')->where('institution_id', InstitutionScope::currentInstitutionId()),
             ],
-            'student_number' => ['required', 'string', 'max:32'],
+            'student_number' => ['required', new Identifier, 'max:32'],
             'semester' => ['required', new SemesterCode],
             'amount' => ['required', new IntegerAmount],
             'expires_at' => ['required', 'date', 'after:now'],
