@@ -30,7 +30,7 @@ class ProcessWebhookNotification
      *
      * @throws Throwable
      */
-    public function handle(Institution $institution, array $notification, string $rawBody): WebhookOutcome
+    public function handle(Institution $institution, array $notification, string $rawBody, TransactionSource $source = TransactionSource::Webhook): WebhookOutcome
     {
         $log = fn (WebhookOutcome $outcome) => $this->recordWebhookLog->handle($outcome, $institution->id, $institution->code, $rawBody, [
             'event' => $notification['event']->value,
@@ -39,8 +39,8 @@ class ProcessWebhookNotification
         ]);
 
         try {
-            return DB::transaction(function () use ($institution, $notification, $log): WebhookOutcome {
-                $outcome = $this->record($institution, $notification);
+            return DB::transaction(function () use ($institution, $notification, $log, $source): WebhookOutcome {
+                $outcome = $this->record($institution, $notification, $source);
                 $log($outcome);
 
                 return $outcome;
@@ -58,7 +58,7 @@ class ProcessWebhookNotification
      *
      * @param  array{event: WebhookEvent, idempotency_key: string, invoice_number: ?string, amount: ?int, occurred_at: CarbonImmutable, gateway_payment_id: ?string}  $notification
      */
-    private function record(Institution $institution, array $notification): WebhookOutcome
+    private function record(Institution $institution, array $notification, TransactionSource $source): WebhookOutcome
     {
         $query = Invoice::query();
 
@@ -84,7 +84,7 @@ class ProcessWebhookNotification
             'amount' => $notification['amount'],
             'occurred_at' => $notification['occurred_at']->format('Y-m-d H:i:s.uP'),
             'gateway_payment_id' => $notification['gateway_payment_id'],
-            'source' => TransactionSource::Webhook->value,
+            'source' => $source->value,
             'created_at' => now(),
         ]);
 
