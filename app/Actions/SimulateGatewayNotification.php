@@ -6,6 +6,7 @@ use App\Enums\GatewayScenario;
 use App\Models\Institution;
 use App\Models\Invoice;
 use App\Models\Scopes\InstitutionScope;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Context;
@@ -29,28 +30,37 @@ class SimulateGatewayNotification
      *
      * @throws ModelNotFoundException when the institution or its invoice does not exist
      */
-    public function handle(GatewayScenario $scenario, string $institutionCode, string $invoiceNumber, string $url): array
+    public function handle(GatewayScenario $scenario, string $institutionCode, string $invoiceNumber, string $url, ?CarbonImmutable $occurredAt = null): array
     {
         $institution = Institution::where('code', $institutionCode)->firstOrFail();
         Context::add(InstitutionScope::CONTEXT_KEY, $institution->id);
         $invoice = Invoice::where('invoice_number', $invoiceNumber)->firstOrFail();
 
-        $payload = match ($scenario) {
-            GatewayScenario::Success, GatewayScenario::BadSignature, GatewayScenario::Retry => $this->capturePayload($institution, $invoice),
-            GatewayScenario::Expiry => $this->expiryPayload($institution, $invoice),
+        $occurredAt ??= CarbonImmutable::now();
+        $payloads = match ($scenario) {
+            GatewayScenario::Success, GatewayScenario::BadSignature => [$this->capturePayload($institution, $invoice, $occurredAt)],
+            GatewayScenario::Retry => array_fill(0, self::XENDIT_DELIVERY_ATTEMPTS, $this->capturePayload($institution, $invoice, $occurredAt)),
+            GatewayScenario::WrongAmount => [$this->capturePayload($institution, $invoice, $occurredAt, $invoice->amount === 1 ? 2 : $invoice->amount - 1)],
+            GatewayScenario::Expiry => [$this->expiryPayload($institution, $invoice, $occurredAt)],
+            GatewayScenario::ExpiryVsSuccess => [
+                $this->capturePayload($institution, $invoice, $occurredAt),
+                $this->expiryPayload($institution, $invoice, $occurredAt->subSecond()),
+            ],
         };
-        $body = json_encode($payload, JSON_THROW_ON_ERROR);
         $secret = $scenario === GatewayScenario::BadSignature ? Str::random(64) : $institution->hmac_secret;
-        $deliveries = $scenario === GatewayScenario::Retry ? self::XENDIT_DELIVERY_ATTEMPTS : 1;
 
-        return array_map(fn (): Response => Http::timeout(10)
-            ->withHeaders([
-                'X-Institution-Code' => $institution->code,
-                'X-Signature' => hash_hmac('sha256', $body, $secret),
-            ])
-            ->withBody($body)
-            ->acceptJson()
-            ->post($url), range(1, $deliveries));
+        return array_map(function (array $payload) use ($institution, $secret, $url): Response {
+            $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+            return Http::timeout(10)
+                ->withHeaders([
+                    'X-Institution-Code' => $institution->code,
+                    'X-Signature' => hash_hmac('sha256', $body, $secret),
+                ])
+                ->withBody($body)
+                ->acceptJson()
+                ->post($url);
+        }, $payloads);
     }
 
     /**
@@ -58,9 +68,9 @@ class SimulateGatewayNotification
      *
      * @return array<string, mixed>
      */
-    private function expiryPayload(Institution $institution, Invoice $invoice): array
+    private function expiryPayload(Institution $institution, Invoice $invoice, CarbonImmutable $occurredAt): array
     {
-        $now = now()->utc()->format('Y-m-d\TH:i:s.vp');
+        $now = $occurredAt->utc()->format('Y-m-d\TH:i:s.up');
 
         return [
             'event' => 'payment_request.expiry',
@@ -83,9 +93,10 @@ class SimulateGatewayNotification
      *
      * @return array<string, mixed>
      */
-    private function capturePayload(Institution $institution, Invoice $invoice): array
+    private function capturePayload(Institution $institution, Invoice $invoice, CarbonImmutable $occurredAt, ?int $amount = null): array
     {
-        $now = now()->utc()->format('Y-m-d\TH:i:s.vp');
+        $now = $occurredAt->utc()->format('Y-m-d\TH:i:s.up');
+        $amount ??= $invoice->amount;
 
         return [
             'event' => 'payment.capture',
@@ -100,7 +111,7 @@ class SimulateGatewayNotification
                 'status' => 'SUCCEEDED',
                 'captures' => [[
                     'capture_id' => 'cptr-'.Str::uuid(),
-                    'capture_amount' => $invoice->amount,
+                    'capture_amount' => $amount,
                     'capture_timestamp' => $now,
                 ]],
                 'created' => $now,

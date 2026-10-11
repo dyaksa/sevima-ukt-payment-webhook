@@ -337,6 +337,81 @@ describe('payload', function () {
     });
 });
 
+describe('event order and anomalies', function () {
+    it('reclassifies a previously received payment when an earlier valid payment arrives later', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($user->institution, capturePayload(['payment_id' => 'py-later', 'updated' => '2026-10-10T09:00:00Z']))
+            ->assertOk();
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertJsonPath('data.transactions.0.annotation', null);
+
+        sendSignedWebhook($user->institution, capturePayload(['payment_id' => 'py-earlier', 'updated' => '2026-10-10T08:00:00Z']))
+            ->assertOk()
+            ->assertJson(['outcome' => 'accepted']);
+
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()
+            ->assertJsonPath('data.status', 'paid')
+            ->assertJsonCount(2, 'data.transactions')
+            ->assertJsonPath('data.transactions.0.gateway_payment_id', 'py-earlier')
+            ->assertJsonPath('data.transactions.0.annotation', null)
+            ->assertJsonPath('data.transactions.1.gateway_payment_id', 'py-later')
+            ->assertJsonPath('data.transactions.1.annotation', 'duplicate_payment');
+    });
+
+    it('marks a capture received after expiry paid and orders history by event time', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($user->institution, expiryPayload())->assertOk();
+        sendSignedWebhook($user->institution, capturePayload())->assertOk();
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()
+            ->assertJsonPath('data.status', 'paid')
+            ->assertJsonPath('data.transactions.0.kind', 'payment')
+            ->assertJsonPath('data.transactions.1.kind', 'expiry');
+    });
+
+    it('includes derived annotations when listing student invoices', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create([
+            'invoice_number' => 'INV-2026-0001',
+            'student_number' => '2021000123',
+            'amount' => 4_500_000,
+        ]);
+
+        sendSignedWebhook($user->institution, capturePayload(['captures' => [['capture_amount' => 5_000_000]]]))
+            ->assertOk();
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.index', ['student_number' => '2021000123']))
+            ->assertOk()
+            ->assertJsonPath('data.0.status', 'unpaid')
+            ->assertJsonPath('data.0.transactions.0.annotation', 'amount_mismatch');
+    });
+
+    it('keeps an underpayment unpaid and exposes the amount mismatch in its history', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($user->institution, capturePayload(['captures' => [['capture_amount' => 4_000_000]]]))
+            ->assertOk()
+            ->assertJson(['outcome' => 'accepted']);
+
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+        $this->getJson(route('v1.invoices.show', 'INV-2026-0001'))
+            ->assertOk()
+            ->assertJsonPath('data.status', 'unpaid')
+            ->assertJsonPath('data.transactions.0.amount', 4_000_000)
+            ->assertJsonPath('data.transactions.0.annotation', 'amount_mismatch');
+    });
+});
+
 describe('processing', function () {
     it('cannot touch another institution invoice and answers 202 as unmatched', function () {
         $institution = Institution::factory()->create();

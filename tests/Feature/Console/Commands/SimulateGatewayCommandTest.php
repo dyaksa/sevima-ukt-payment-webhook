@@ -69,6 +69,87 @@ it('sends the same signed capture six times in the retry scenario', function () 
         ->and($sent->first()['event'])->toBe('payment.capture');
 });
 
+it('sends an incorrect whole-rupiah capture at the chosen event time', function () {
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+    Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
+
+    $this->artisan('gateway:simulate', [
+        'scenario' => 'wrong-amount',
+        'institution' => $institution->code,
+        'invoice' => 'INV-2026-0001',
+        '--occurred-at' => '2026-10-10T08:00:00.123456Z',
+    ])->assertSuccessful();
+
+    Http::assertSent(fn (Request $request) => $request['data']['captures'][0]['capture_amount'] === 4_499_999
+        && $request['data']['updated'] === '2026-10-10T08:00:00.123456Z'
+        && $request->header('X-Signature') === [hash_hmac('sha256', $request->body(), $institution->hmac_secret)]);
+});
+
+it('delivers an expiry after a capture while preserving the earlier expiry event time', function () {
+    $this->travelTo('2026-10-10T10:00:00Z');
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
+
+    $this->artisan('gateway:simulate', [
+        'scenario' => 'expiry-vs-success',
+        'institution' => $institution->code,
+        'invoice' => 'INV-2026-0001',
+        '--occurred-at' => '2026-10-10T09:00:00Z',
+    ])->assertSuccessful();
+
+    Http::assertSentCount(2);
+    $sent = Http::recorded()->map(fn (array $pair) => $pair[0]);
+    expect($sent->map(fn (Request $request) => $request['event'])->all())->toBe(['payment.capture', 'payment_request.expiry'])
+        ->and($sent->map(fn (Request $request) => $request['data']['updated'])->all())->toBe([
+            '2026-10-10T09:00:00.000000Z',
+            '2026-10-10T08:59:59.000000Z',
+        ]);
+    expect($sent->every(fn (Request $request): bool => $request->header('X-Signature') === [hash_hmac('sha256', $request->body(), $institution->hmac_secret)]))->toBeTrue();
+});
+
+it('uses a positive mismatched amount when the invoice is one rupiah', function () {
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 1]);
+    Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
+
+    $this->artisan('gateway:simulate', ['scenario' => 'wrong-amount', 'institution' => $institution->code, 'invoice' => 'INV-2026-0001'])
+        ->assertSuccessful();
+
+    Http::assertSent(fn (Request $request) => $request['data']['captures'][0]['capture_amount'] === 2);
+});
+
+it('rejects an explicitly empty event time instead of delivering with the current time', function (string $occurredAt) {
+    $institution = Institution::factory()->create();
+    Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001']);
+    Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
+
+    $this->artisan('gateway:simulate', [
+        'scenario' => 'success',
+        'institution' => $institution->code,
+        'invoice' => 'INV-2026-0001',
+        '--occurred-at' => $occurredAt,
+    ])->expectsOutputToContain('The event time must be an ISO 8601 timestamp with an offset.')
+        ->assertFailed();
+
+    Http::assertNothingSent();
+})->with(['empty' => '', 'whitespace' => ' ']);
+
+it('rejects a malformed event time without delivering a notification', function () {
+    Http::fake([route('v1.webhooks.store') => Http::response(['outcome' => 'accepted'])]);
+
+    $this->artisan('gateway:simulate', [
+        'scenario' => 'success',
+        'institution' => 'UNIV-A',
+        'invoice' => 'INV-2026-0001',
+        '--occurred-at' => 'not-a-date',
+    ])->expectsOutputToContain('The event time must be an ISO 8601 timestamp with an offset.')
+        ->assertFailed();
+
+    Http::assertNothingSent();
+});
+
 it('fails for an invoice the institution does not have', function () {
     $institution = Institution::factory()->create();
     Invoice::factory()->create(['invoice_number' => 'INV-2026-0001']);

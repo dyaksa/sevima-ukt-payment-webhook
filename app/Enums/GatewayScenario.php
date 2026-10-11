@@ -11,4 +11,6 @@ enum GatewayScenario: string
     case BadSignature = 'bad-signature';
     case Expiry = 'expiry';
     case Retry = 'retry';
+    case WrongAmount = 'wrong-amount';
+    case ExpiryVsSuccess = 'expiry-vs-success';
 }
