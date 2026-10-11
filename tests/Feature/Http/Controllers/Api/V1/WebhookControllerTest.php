@@ -272,7 +272,7 @@ describe('payload', function () {
         $institution = Institution::factory()->create();
         Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
 
-        sendSignedWebhook($institution, capturePayload(['updated' => '2026-10-10T15:00:00+07:00']))
+        sendSignedWebhook($institution, capturePayload(['updated' => '2026-10-10T16:00:00+07:00']))
             ->assertOk()
             ->assertJson(['outcome' => 'accepted']);
     });
