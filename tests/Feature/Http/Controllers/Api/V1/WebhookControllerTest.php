@@ -254,10 +254,33 @@ describe('payload', function () {
         $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
     });
 
-    it('rejects an identifier with a control character with 422', function (array $payload, string $field) {
+    it('rejects an event time more than an hour ahead of the clock with 422', function () {
+        $this->travelTo('2026-10-10T08:00:00Z');
         $institution = Institution::factory()->create();
         Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
-        $payload['data'][$field] .= "\u{0000}junk";
+
+        sendSignedWebhook($institution, capturePayload(['updated' => '2026-10-10T09:00:01Z']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['data.updated']);
+
+        $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
+    });
+
+    it('accepts an event time ahead of the clock within the one-hour allowance', function () {
+        $this->travelTo('2026-10-10T08:00:00Z');
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, capturePayload(['updated' => '2026-10-10T16:00:00+07:00']))
+            ->assertOk()
+            ->assertJson(['outcome' => 'accepted']);
+    });
+
+    it('rejects an identifier with a control character with 422', function (array $payload, string $field, string $controlCharacter) {
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+        $payload['data'][$field] .= "{$controlCharacter}junk";
 
         sendSignedWebhook($institution, $payload)
             ->assertUnprocessable()
@@ -266,9 +289,10 @@ describe('payload', function () {
         $this->assertDatabaseCount('transactions', 0);
         $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
     })->with([
-        'capture reference id' => [capturePayload(), 'reference_id'],
-        'capture payment id' => [capturePayload(), 'payment_id'],
-        'expiry payment request id' => [expiryPayload(), 'payment_request_id'],
+        'NUL in capture reference id' => [capturePayload(), 'reference_id', "\u{0000}"],
+        'unit separator in capture reference id' => [capturePayload(), 'reference_id', "\u{001F}"],
+        'NUL in capture payment id' => [capturePayload(), 'payment_id', "\u{0000}"],
+        'NUL in expiry payment request id' => [expiryPayload(), 'payment_request_id', "\u{0000}"],
     ]);
 
     it('ignores query string values the signature does not cover', function () {
@@ -288,6 +312,7 @@ describe('payload', function () {
             ->assertJsonValidationErrors(['event']);
 
         $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
     });
 
     it('accepts the brief alias payment.success as a capture', function () {

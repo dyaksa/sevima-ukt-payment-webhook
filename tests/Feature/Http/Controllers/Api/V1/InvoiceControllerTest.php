@@ -114,6 +114,22 @@ describe('store', function () {
         'free text' => 'Ganjil 2026',
     ]);
 
+    it('rejects an identifier with a control character with 422', function (string $field, string $controlCharacter) {
+        Sanctum::actingAs(User::factory()->create(), [TokenAbility::InvoicesWrite->value]);
+        $payload = invoicePayload();
+        $payload[$field] .= "{$controlCharacter}junk";
+
+        $this->postJson(route('v1.invoices.store'), $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors([$field]);
+
+        $this->assertDatabaseCount('invoices', 0);
+    })->with([
+        'NUL in invoice number' => ['invoice_number', "\u{0000}"],
+        'unit separator in invoice number' => ['invoice_number', "\u{001F}"],
+        'NUL in student number' => ['student_number', "\u{0000}"],
+    ]);
+
     it('rejects an empty payload with 422 listing every required field', function () {
         Sanctum::actingAs(User::factory()->create(), [TokenAbility::InvoicesWrite->value]);
 
@@ -287,6 +303,14 @@ describe('show', function () {
             ->assertJsonPath('data.invoice_number', 'INV-2026-0001')
             ->assertJsonPath('data.amount', $invoice->amount)
             ->assertJsonPath('data.status', 'unpaid');
+    });
+
+    it('returns 404 for an invoice number with a control character', function () {
+        $user = User::factory()->create();
+        Invoice::factory()->for($user->institution)->create(['invoice_number' => 'INV-2026-0001']);
+        Sanctum::actingAs($user, [TokenAbility::InvoicesRead->value]);
+
+        $this->getJson('/api/v1/invoices/INV-2026-0001%00junk')->assertNotFound();
     });
 
     it('returns 404 for an invoice that belongs to another institution', function () {
