@@ -35,7 +35,9 @@ class StoreWebhookRequest extends FormRequest
      * Get the validation rules that apply to the request. Only the capture
      * and expiry events are handled so far; later tickets widen the list.
      * Each event requires the id of its own resource. The event time has a
-     * lower bound so every accepted value fits PostgreSQL's timestamp range.
+     * lower bound so every accepted value fits PostgreSQL's timestamp range,
+     * and may run at most one hour ahead of this clock (skew allowance), so a
+     * far-future time cannot sort after every real event (see DECISIONS.md).
      *
      * @return array<string, ValidationRule|array<mixed>|string>
      */
@@ -58,7 +60,7 @@ class StoreWebhookRequest extends FormRequest
             'data.reference_id' => ['required', new Identifier, 'max:64'],
             'data.currency' => ['required', 'string', 'in:IDR'],
             // ISO 8601 with an offset; `p` matches "Z" and `P` matches "+00:00".
-            'data.updated' => ['required', 'date_format:Y-m-d\TH:i:sp,Y-m-d\TH:i:s.vp,Y-m-d\TH:i:s.up,Y-m-d\TH:i:sP,Y-m-d\TH:i:s.vP,Y-m-d\TH:i:s.uP', 'after:2000-01-01'],
+            'data.updated' => ['required', 'date_format:Y-m-d\TH:i:sp,Y-m-d\TH:i:s.vp,Y-m-d\TH:i:s.up,Y-m-d\TH:i:sP,Y-m-d\TH:i:s.vP,Y-m-d\TH:i:s.uP', 'after:2000-01-01', 'before_or_equal:'.now()->addHour()->toIso8601String()],
             'data.captures' => [Rule::requiredIf($event === WebhookEvent::PaymentCapture), 'array', 'min:1'],
             'data.captures.*.capture_amount' => ['required', new IntegerAmount],
         ];

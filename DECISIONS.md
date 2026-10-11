@@ -39,3 +39,15 @@ Smaller rulings the candidate made while a ticket was built.
 **Decision.** Option 2.
 
 **Consequences.** Listing a student's invoices stays inside the caller's institution even if the institution context were set wrong. A test covers this by replacing the institution-context middleware with one that points at another institution. Future list endpoints follow the same pattern.
+
+### An event time must fall inside a fixed window
+
+**Context.** The ledger orders events by `occurred_at`, taken from the gateway's `data.updated`. Year 0000 passed the date format and then crashed PostgreSQL's insert with a 500, and a far-future time such as 9999-12-31 would sort after every real event for good.
+
+**Options.**
+1. Accept any well-formed time, trusting the signed gateway.
+2. Accept only times after 2000-01-01 and at most one hour after the server clock; refuse others with 422.
+
+**Decision.** Option 2. The floor is a sanity bound well before any real gateway event. The one-hour ceiling allows for clock skew between the gateway and this server.
+
+**Consequences.** Every accepted time fits PostgreSQL's range and cannot jump ahead of later events. A gateway clock more than an hour fast would see its notifications refused with 422, logged as invalid. The gateway retries any non-2xx answer, and reconciliation picks up an event once those retries are exhausted.

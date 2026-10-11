@@ -254,6 +254,29 @@ describe('payload', function () {
         $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
     });
 
+    it('rejects an event time more than an hour ahead of the clock with 422', function () {
+        $this->travelTo('2026-10-10T08:00:00Z');
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, capturePayload(['updated' => '2026-10-10T09:00:01Z']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['data.updated']);
+
+        $this->assertDatabaseCount('transactions', 0);
+        $this->assertDatabaseHas('webhook_logs', ['institution_id' => $institution->id, 'outcome' => 'invalid']);
+    });
+
+    it('accepts an event time ahead of the clock within the one-hour allowance', function () {
+        $this->travelTo('2026-10-10T08:00:00Z');
+        $institution = Institution::factory()->create();
+        Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
+
+        sendSignedWebhook($institution, capturePayload(['updated' => '2026-10-10T15:00:00+07:00']))
+            ->assertOk()
+            ->assertJson(['outcome' => 'accepted']);
+    });
+
     it('rejects an identifier with a control character with 422', function (array $payload, string $field, string $controlCharacter) {
         $institution = Institution::factory()->create();
         Invoice::factory()->for($institution)->create(['invoice_number' => 'INV-2026-0001', 'amount' => 4_500_000]);
