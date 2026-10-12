@@ -20,7 +20,7 @@ Multi-institution backend for tuition (UKT) invoices, one per student per semest
 
 ### Multi-institution
 
-- One database serves many institutions. Every domain table carries `institution_id`, and every query is scoped to exactly one institution through a global scope or an institution relation.
+- One database serves many institutions. Invoice and transaction queries use the institution global scope or an institution relation. Identity/provisioning records (`Institution`, `User`) are resolved separately. `WebhookLog` is an append-only audit exception: its `institution_id` is nullable for untrusted/unknown codes and it has no global scope. Any future audit read path must filter by institution explicitly (see `DECISIONS.md`).
 - The institution comes from the authenticated user. For webhooks it comes from the institution code header once the signature is valid. A request body's `institution_id` is ignored.
 - `invoice_number` is unique per institution (`institution_id` + `invoice_number`) and may repeat across institutions.
 - Users see and change only their own institution's data. Cross-institution access returns 404.
@@ -41,7 +41,7 @@ Multi-institution backend for tuition (UKT) invoices, one per student per semest
 - Status precedence: `refunded` > `paid` > `expired` > `unpaid`.
 - `paid` needs a success event whose amount equals the invoice amount. A success that arrives after expiry still yields `paid`; an expired event never lowers `paid`.
 - A success with a different amount is recorded and flagged, and the status stays. A second exact success is recorded as a duplicate payment, and the status stays.
-- A full refund yields `refunded` (final). A partial refund is recorded and flagged `needs_review`, and the status stays.
+- With an exact payment present, successful cumulative refunds reaching the invoice amount yield `refunded` (final). An individual partial refund is recorded and flagged `needs_review`; until the cumulative full amount is reached, the status stays paid.
 - `expired` comes only from the gateway's expiry event; no scheduled job sets it by date. Pending (authorization) is informational.
 - Amounts are integer rupiah (BIGINT, CHECK > 0). Payload amounts that are fractional or in scientific notation are rejected with 422. No floats anywhere.
 - Ambiguous business rules go to the candidate, and the answer goes in `DECISIONS.md`.
