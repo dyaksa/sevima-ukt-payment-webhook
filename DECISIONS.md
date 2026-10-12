@@ -1,5 +1,65 @@
 # Decisions
 
+## 1. Derive status from the ledger
+
+**Context.** Webhooks can arrive late, out of order, or repeatedly. Invoice status decides whether a student may enrol in courses, so arrival order must not decide eligibility.
+
+**Options.**
+1. Replace status with the newest received webhook's status.
+2. Derive status from the invoice amount and its ordered, append-only transactions.
+
+**Decision.** Option 2. `CalculateInvoiceStatus` is pure. `ProcessWebhookNotification` records each event and recomputes stored status in one database transaction under an invoice row lock. History uses `occurred_at`, then UUIDv7 `id`, as a deterministic tie-breaker. Precedence is refunded, paid, expired, unpaid.
+
+**Consequences.** An exact payment after expiry still grants paid, and a late expiry cannot lower it. Wrong amounts and repeated exact payments remain auditable with derived annotations. Authorization and failed attempts do not change the balance. Recomputing has a cost proportional to an invoice's history; optimize only if measurements justify it.
+
+## 2. Isolate institutions and return 404 across the boundary
+
+**Context.** Institutions share a database and may use identical invoice numbers. Neither a supplied institution ID nor an otherwise valid staff token may expose another institution's invoices.
+
+**Options.**
+1. Filter by institution ad hoc in each controller.
+2. Combine institution context/global scopes, policy or explicit caller filters, and scoped route binding.
+
+**Decision.** Option 2. Staff identity supplies the context; valid webhook HMAC supplies it for gateway requests. `BelongsToInstitution` and `InstitutionScope` enforce domain queries. List queries also filter by the authenticated user's institution, show uses `InvoicePolicy`, and route binding resolves invoice numbers within the scope. Read access across institutions returns 404.
+
+**Consequences.** New domain queries inherit isolation, and duplicate identifiers across institutions remain safe. Missing context fails rather than producing an unscoped domain query. Institutions/users are identity/provisioning records; WebhookLog has a deliberate exception for auditing untrusted requests, described below. Any future audit read API must explicitly enforce the institution boundary.
+
+## 3. Store integer rupiah, never floating-point money
+
+**Context.** Equality with the invoice amount opens enrolment access. Fractional rounding or scientific-notation parsing must not create an apparent exact payment.
+
+**Options.**
+1. Floating-point or decimal amounts with rounding rules.
+2. Integer rupiah throughout validation, calculation and storage.
+
+**Decision.** Option 2. Amounts are BIGINT with positive-value CHECK constraints. `IntegerAmount` accepts JSON integers or canonical positive digit strings, from 1 to one trillion rupiah per value; floats, fractions and scientific notation return 422. A capture payment is the sum of its capture amounts. Events without money have a null ledger amount.
+
+**Consequences.** Exact comparisons are deterministic and do not require a money dependency. The application is intentionally IDR-only. Supporting fractional currencies requires a separately agreed minor-unit contract, not a float conversion.
+
+## 4. Enforce idempotency and explicit HTTP outcomes
+
+**Context.** A gateway retries notifications and cannot know whether a previous request committed before the connection failed. A real second payment must not be confused with a repeated delivery.
+
+**Options.**
+1. Application-only duplicate checks, or keys derived solely from an invoice number.
+2. Institution-scoped unique resource-event keys enforced by PostgreSQL, with explicit outcomes.
+
+**Decision.** Option 2. The key uses the canonical event name and the resource ID: payment_id for payment events, id for refunds, payment_request_id for expiry. Aliases normalize to the same event. Accepted and duplicate return 200, unmatched returns 202, identical bad-signature/unknown-code responses return 401, and invalid payload returns 422. Every received request creates an audit row; duplicates do not create another ledger row.
+
+**Consequences.** The unique constraint closes concurrent-delivery races. A new payment ID remains a distinct payment, even for the same invoice and amount. 2xx stops gateway retries, so unmatched events require reconciliation if their invoice/payment later becomes available. Authenticity uses raw-body HMAC before parsing; unexpected failures are not converted into successful outcomes.
+
+## 5. Recover only missing gateway events and bound refund scope
+
+**Context.** Webhook delivery can be lost. A gateway/ledger discrepancy is not always evidence that an automatic money correction is safe. Refunds need an institution-scoped link to their earlier payment.
+
+**Options.**
+1. Automatically rewrite every discrepancy and infer refunds from invoice references.
+2. Apply only missing events through normal processing; report conflicts and amount differences; resolve refunds by gateway payment ID.
+
+**Decision.** Option 2. Hourly reconciliation uses a default inclusive 48-hour event-time lookback and an overlap lock. The append-only mock gateway book is validated before application. Missing events use `ProcessWebhookNotification`, ordered by event time, with source reconciliation. Amount mismatches, ledger events absent from the book, and conflicting invoice assignments are report-only. Refunds resolve through an earlier transaction of the same institution. Successful cumulative refunds reaching the invoice amount make refunded final when an exact payment exists; partial refunds are annotated needs_review, and failed refunds do not move money.
+
+**Consequences.** The same idempotency, locking, audit and status logic protects webhook and recovery paths. A refund received before its payment is initially unmatched and can later be recovered. Human judgement is required for money conflicts; neither ledger nor audit history is rewritten. Date-only expiry and a real gateway integration remain out of scope. The local JSONL book must eventually be rotated or indexed if its validation cost grows.
+
 ## Recorded during implementation
 
 Smaller rulings the candidate made while a ticket was built.
