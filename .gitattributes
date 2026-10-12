@@ -6,6 +6,9 @@
 *.md diff=markdown
 *.php diff=php
 
+# Scribe emits whitespace-only lines in its generated HTML template.
+public/docs/index.html whitespace=-blank-at-eol
+
 /.github export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore

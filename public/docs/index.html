@@ -1,0 +1,1055 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta content="IE=edge,chrome=1" http-equiv="X-UA-Compatible">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>UKT Payment API</title>
+
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="../docs/css/theme-default.style.css" media="screen">
+    <link rel="stylesheet" href="../docs/css/theme-default.print.css" media="print">
+
+    <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.10/lodash.min.js"></script>
+
+    <link rel="stylesheet"
+          href="https://unpkg.com/@highlightjs/cdn-assets@11.6.0/styles/obsidian.min.css">
+    <script src="https://unpkg.com/@highlightjs/cdn-assets@11.6.0/highlight.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jets/0.14.1/jets.min.js"></script>
+
+    <style id="language-style">
+        /* starts out as display none and is replaced with js later  */
+                    body .content .bash-example code { display: none; }
+            </style>
+
+
+    <script src="../docs/js/theme-default-5.11.0.js"></script>
+
+</head>
+
+<body data-languages="[&quot;bash&quot;]">
+
+<a href="#" id="nav-button">
+    <span>
+        MENU
+        <img src="../docs/images/navbar.png" alt="navbar-image"/>
+    </span>
+</a>
+<div class="tocify-wrapper">
+    
+            <div class="lang-selector">
+                                            <button type="button" class="lang-button" data-language-name="bash">bash</button>
+                    </div>
+    
+    <div class="search">
+        <input type="text" class="search" id="input-search" placeholder="Search">
+    </div>
+
+    <div id="toc">
+                    <ul id="tocify-header-introduction" class="tocify-header">
+                <li class="tocify-item level-1" data-unique="introduction">
+                    <a href="#introduction">Introduction</a>
+                </li>
+                            </ul>
+                    <ul id="tocify-header-authenticating-requests" class="tocify-header">
+                <li class="tocify-item level-1" data-unique="authenticating-requests">
+                    <a href="#authenticating-requests">Authenticating requests</a>
+                </li>
+                            </ul>
+                    <ul id="tocify-header-invoices" class="tocify-header">
+                <li class="tocify-item level-1" data-unique="invoices">
+                    <a href="#invoices">Invoices</a>
+                </li>
+                                    <ul id="tocify-subheader-invoices" class="tocify-subheader">
+                                                    <li class="tocify-item level-2" data-unique="invoices-GETapi-v1-invoices">
+                                <a href="#invoices-GETapi-v1-invoices">List a student's invoices</a>
+                            </li>
+                                                                                <li class="tocify-item level-2" data-unique="invoices-POSTapi-v1-invoices">
+                                <a href="#invoices-POSTapi-v1-invoices">Issue an invoice</a>
+                            </li>
+                                                                                <li class="tocify-item level-2" data-unique="invoices-GETapi-v1-invoices--invoice_number-">
+                                <a href="#invoices-GETapi-v1-invoices--invoice_number-">Show an invoice and its history</a>
+                            </li>
+                                                                        </ul>
+                            </ul>
+                    <ul id="tocify-header-webhooks" class="tocify-header">
+                <li class="tocify-item level-1" data-unique="webhooks">
+                    <a href="#webhooks">Webhooks</a>
+                </li>
+                                    <ul id="tocify-subheader-webhooks" class="tocify-subheader">
+                                                    <li class="tocify-item level-2" data-unique="webhooks-POSTapi-v1-webhooks-payments">
+                                <a href="#webhooks-POSTapi-v1-webhooks-payments">Receive a signed gateway notification</a>
+                            </li>
+                                                                        </ul>
+                            </ul>
+            </div>
+
+    <ul class="toc-footer" id="toc-footer">
+                    <li style="padding-bottom: 5px;"><a href="../docs/collection.json">View Postman collection</a></li>
+                            <li style="padding-bottom: 5px;"><a href="../docs/openapi.yaml">View OpenAPI spec</a></li>
+                <li><a href="http://github.com/knuckleswtf/scribe">Documentation powered by Scribe ✍</a></li>
+    </ul>
+
+    <ul class="toc-footer" id="last-updated">
+        <li></li>
+    </ul>
+</div>
+
+<div class="page-wrapper">
+    <div class="dark-box"></div>
+    <div class="content">
+        <h1 id="introduction">Introduction</h1>
+<p>Institution-isolated tuition invoices and signed mock gateway notifications.</p>
+<aside>
+    <strong>Base URL</strong>: <code>http://localhost:8000</code>
+</aside>
+<p>All examples are synthetic. Invoice endpoints require a staff token; webhooks require an institution code and an HMAC over the exact request body. See README.md for setup, simulator scenarios and hand-signed requests.</p>
+
+        <h1 id="authenticating-requests">Authenticating requests</h1>
+<p>To authenticate requests, include an <strong><code>Authorization</code></strong> header with the value <strong><code>"Bearer {STAFF_TOKEN}"</code></strong>.</p>
+<p>All authenticated endpoints are marked with a <code>requires authentication</code> badge in the documentation below.</p>
+<p>Run <code>vendor/bin/sail artisan token:issue finance@univ-a.test</code>. Read routes require <code>invoices:read</code>; issuing an invoice requires <code>invoices:write</code>. Tokens belong to the staff user's institution. Webhooks use HMAC headers instead of a bearer token.</p>
+
+        <h1 id="invoices">Invoices</h1>
+
+    
+
+                                <h2 id="invoices-GETapi-v1-invoices">List a student&#039;s invoices</h2>
+
+<p>
+<small class="badge badge-darkred">requires authentication</small>
+</p>
+
+<p>Requires invoices:read. Returns only the caller's institution, newest semester
+first, with history ordered by occurred_at then id. An empty match returns data: [].
+The explicit institution filter is the second layer behind the global scope.</p>
+
+<span id="example-requests-GETapi-v1-invoices">
+<blockquote>Example request:</blockquote>
+
+
+<div class="bash-example">
+    <pre><code class="language-bash">curl --request GET \
+    --get "http://localhost:8000/api/v1/invoices?student_number=20260001&amp;semester=20261" \
+    --header "Authorization: Bearer {STAFF_TOKEN}" \
+    --header "Content-Type: application/json" \
+    --header "Accept: application/json"</code></pre></div>
+
+</span>
+
+<span id="example-responses-GETapi-v1-invoices">
+            <blockquote>
+            <p>Example response (200):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;data&quot;: [
+        {
+            &quot;invoice_number&quot;: &quot;INV-2026-0001&quot;,
+            &quot;student_number&quot;: &quot;20260001&quot;,
+            &quot;semester&quot;: &quot;20261&quot;,
+            &quot;amount&quot;: 1500000,
+            &quot;status&quot;: &quot;unpaid&quot;,
+            &quot;expires_at&quot;: &quot;2027-01-01T00:00:00+00:00&quot;,
+            &quot;created_at&quot;: &quot;2026-10-11T00:00:00+00:00&quot;,
+            &quot;transactions&quot;: []
+        }
+    ]
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (401):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;Unauthenticated.&quot;
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (403):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;Invalid ability provided.&quot;
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (422):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;The student number field is required.&quot;,
+    &quot;errors&quot;: {
+        &quot;student_number&quot;: [
+            &quot;The student number field is required.&quot;
+        ]
+    }
+}</code>
+ </pre>
+    </span>
+<span id="execution-results-GETapi-v1-invoices" hidden>
+    <blockquote>Received response<span
+                id="execution-response-status-GETapi-v1-invoices"></span>:
+    </blockquote>
+    <pre class="json"><code id="execution-response-content-GETapi-v1-invoices"
+      data-empty-response-text="<Empty response>" style="max-height: 400px;"></code></pre>
+</span>
+<span id="execution-error-GETapi-v1-invoices" hidden>
+    <blockquote>Request failed with error:</blockquote>
+    <pre><code id="execution-error-message-GETapi-v1-invoices">
+
+Tip: Check that you&#039;re properly connected to the network.
+If you&#039;re a maintainer of ths API, verify that your API is running and you&#039;ve enabled CORS.
+You can check the Dev Tools console for debugging information.</code></pre>
+</span>
+<form id="form-GETapi-v1-invoices" data-method="GET"
+      data-path="api/v1/invoices"
+      data-authed="1"
+      data-hasfiles="0"
+      data-isarraybody="0"
+      autocomplete="off"
+      onsubmit="event.preventDefault(); executeTryOut('GETapi-v1-invoices', this);">
+    <h3>
+        Request&nbsp;&nbsp;&nbsp;
+            </h3>
+            <p>
+            <small class="badge badge-green">GET</small>
+            <b><code>api/v1/invoices</code></b>
+        </p>
+                <h4 class="fancy-heading-panel"><b>Headers</b></h4>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Authorization</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Authorization" class="auth-value"               data-endpoint="GETapi-v1-invoices"
+               value="Bearer {STAFF_TOKEN}"
+               data-component="header">
+    <br>
+<p>Example: <code>Bearer {STAFF_TOKEN}</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Content-Type</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Content-Type"                data-endpoint="GETapi-v1-invoices"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Accept</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Accept"                data-endpoint="GETapi-v1-invoices"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                            <h4 class="fancy-heading-panel"><b>Query Parameters</b></h4>
+                                    <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>student_number</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="student_number"                data-endpoint="GETapi-v1-invoices"
+               value="20260001"
+               data-component="query">
+    <br>
+<p>Student number, up to 32 characters. Example: <code>20260001</code></p>
+            </div>
+                                    <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>semester</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+<i>optional</i> &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="semester"                data-endpoint="GETapi-v1-invoices"
+               value="20261"
+               data-component="query">
+    <br>
+<p>Optional semester in YYYY1 or YYYY2 format. Example: <code>20261</code></p>
+            </div>
+                </form>
+
+                    <h2 id="invoices-POSTapi-v1-invoices">Issue an invoice</h2>
+
+<p>
+<small class="badge badge-darkred">requires authentication</small>
+</p>
+
+<p>Requires invoices:write. Institution ownership comes from the staff token;
+a body institution_id is ignored. Duplicate invoice numbers in the same
+institution return 422. Identifiers must have no whitespace
+at their boundaries or control characters. The initial status is unpaid.</p>
+
+<span id="example-requests-POSTapi-v1-invoices">
+<blockquote>Example request:</blockquote>
+
+
+<div class="bash-example">
+    <pre><code class="language-bash">curl --request POST \
+    "http://localhost:8000/api/v1/invoices" \
+    --header "Authorization: Bearer {STAFF_TOKEN}" \
+    --header "Content-Type: application/json" \
+    --header "Accept: application/json" \
+    --data "{
+    \"invoice_number\": \"INV-2026-0001\",
+    \"student_number\": \"20260001\",
+    \"semester\": \"20261\",
+    \"amount\": 1500000,
+    \"expires_at\": \"2027-01-01T00:00:00+00:00\"
+}"
+</code></pre></div>
+
+</span>
+
+<span id="example-responses-POSTapi-v1-invoices">
+            <blockquote>
+            <p>Example response (201):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;data&quot;: {
+        &quot;invoice_number&quot;: &quot;INV-2026-0001&quot;,
+        &quot;student_number&quot;: &quot;20260001&quot;,
+        &quot;semester&quot;: &quot;20261&quot;,
+        &quot;amount&quot;: 1500000,
+        &quot;status&quot;: &quot;unpaid&quot;,
+        &quot;expires_at&quot;: &quot;2027-01-01T00:00:00+00:00&quot;,
+        &quot;created_at&quot;: &quot;2026-10-11T00:00:00+00:00&quot;
+    }
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (401):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;Unauthenticated.&quot;
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (403):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;Invalid ability provided.&quot;
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (422):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;The invoice number has already been taken.&quot;,
+    &quot;errors&quot;: {
+        &quot;invoice_number&quot;: [
+            &quot;The invoice number has already been taken.&quot;
+        ]
+    }
+}</code>
+ </pre>
+    </span>
+<span id="execution-results-POSTapi-v1-invoices" hidden>
+    <blockquote>Received response<span
+                id="execution-response-status-POSTapi-v1-invoices"></span>:
+    </blockquote>
+    <pre class="json"><code id="execution-response-content-POSTapi-v1-invoices"
+      data-empty-response-text="<Empty response>" style="max-height: 400px;"></code></pre>
+</span>
+<span id="execution-error-POSTapi-v1-invoices" hidden>
+    <blockquote>Request failed with error:</blockquote>
+    <pre><code id="execution-error-message-POSTapi-v1-invoices">
+
+Tip: Check that you&#039;re properly connected to the network.
+If you&#039;re a maintainer of ths API, verify that your API is running and you&#039;ve enabled CORS.
+You can check the Dev Tools console for debugging information.</code></pre>
+</span>
+<form id="form-POSTapi-v1-invoices" data-method="POST"
+      data-path="api/v1/invoices"
+      data-authed="1"
+      data-hasfiles="0"
+      data-isarraybody="0"
+      autocomplete="off"
+      onsubmit="event.preventDefault(); executeTryOut('POSTapi-v1-invoices', this);">
+    <h3>
+        Request&nbsp;&nbsp;&nbsp;
+            </h3>
+            <p>
+            <small class="badge badge-black">POST</small>
+            <b><code>api/v1/invoices</code></b>
+        </p>
+                <h4 class="fancy-heading-panel"><b>Headers</b></h4>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Authorization</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Authorization" class="auth-value"               data-endpoint="POSTapi-v1-invoices"
+               value="Bearer {STAFF_TOKEN}"
+               data-component="header">
+    <br>
+<p>Example: <code>Bearer {STAFF_TOKEN}</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Content-Type</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Content-Type"                data-endpoint="POSTapi-v1-invoices"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Accept</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Accept"                data-endpoint="POSTapi-v1-invoices"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <h4 class="fancy-heading-panel"><b>Body Parameters</b></h4>
+        <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>invoice_number</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="invoice_number"                data-endpoint="POSTapi-v1-invoices"
+               value="INV-2026-0001"
+               data-component="body">
+    <br>
+<p>Unique number within the institution, up to 64 characters. Example: <code>INV-2026-0001</code></p>
+        </div>
+                <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>student_number</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="student_number"                data-endpoint="POSTapi-v1-invoices"
+               value="20260001"
+               data-component="body">
+    <br>
+<p>Student number, up to 32 characters. Example: <code>20260001</code></p>
+        </div>
+                <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>semester</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="semester"                data-endpoint="POSTapi-v1-invoices"
+               value="20261"
+               data-component="body">
+    <br>
+<p>Semester in YYYY1 or YYYY2 format. Example: <code>20261</code></p>
+        </div>
+                <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>amount</code></b>&nbsp;&nbsp;
+<small>integer</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="number" style="display: none"
+               step="any"               name="amount"                data-endpoint="POSTapi-v1-invoices"
+               value="1500000"
+               data-component="body">
+    <br>
+<p>Whole rupiah from 1 to 1000000000000; decimal and scientific notation are rejected. A canonical digit string is also accepted. Example: <code>1500000</code></p>
+        </div>
+                <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>expires_at</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="expires_at"                data-endpoint="POSTapi-v1-invoices"
+               value="2027-01-01T00:00:00+00:00"
+               data-component="body">
+    <br>
+<p>Future date/time. Example: <code>2027-01-01T00:00:00+00:00</code></p>
+        </div>
+        </form>
+
+                    <h2 id="invoices-GETapi-v1-invoices--invoice_number-">Show an invoice and its history</h2>
+
+<p>
+<small class="badge badge-darkred">requires authentication</small>
+</p>
+
+<p>Requires invoices:read. A missing invoice or another institution's invoice
+returns 404. History is append-only, ordered by occurred_at then id, and
+includes annotations derived from the ledger rather than stored edits.</p>
+
+<span id="example-requests-GETapi-v1-invoices--invoice_number-">
+<blockquote>Example request:</blockquote>
+
+
+<div class="bash-example">
+    <pre><code class="language-bash">curl --request GET \
+    --get "http://localhost:8000/api/v1/invoices/INV-2026-0001" \
+    --header "Authorization: Bearer {STAFF_TOKEN}" \
+    --header "Content-Type: application/json" \
+    --header "Accept: application/json"</code></pre></div>
+
+</span>
+
+<span id="example-responses-GETapi-v1-invoices--invoice_number-">
+            <blockquote>
+            <p>Example response (200):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;data&quot;: {
+        &quot;invoice_number&quot;: &quot;INV-2026-0001&quot;,
+        &quot;student_number&quot;: &quot;20260001&quot;,
+        &quot;semester&quot;: &quot;20261&quot;,
+        &quot;amount&quot;: 1500000,
+        &quot;status&quot;: &quot;paid&quot;,
+        &quot;expires_at&quot;: &quot;2027-01-01T00:00:00+00:00&quot;,
+        &quot;created_at&quot;: &quot;2026-10-11T00:00:00+00:00&quot;,
+        &quot;transactions&quot;: [
+            {
+                &quot;kind&quot;: &quot;payment&quot;,
+                &quot;annotation&quot;: null,
+                &quot;amount&quot;: 1500000,
+                &quot;occurred_at&quot;: &quot;2026-10-11T01:00:00+00:00&quot;,
+                &quot;gateway_payment_id&quot;: &quot;py-example&quot;,
+                &quot;source&quot;: &quot;webhook&quot;,
+                &quot;idempotency_key&quot;: &quot;payment.capture:py-example&quot;,
+                &quot;recorded_at&quot;: &quot;2026-10-11T01:00:01+00:00&quot;
+            }
+        ]
+    }
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (401):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;Unauthenticated.&quot;
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (403):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;Invalid ability provided.&quot;
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (404):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;No query results for model [App\\Models\\Invoice] INV-2026-0001&quot;
+}</code>
+ </pre>
+    </span>
+<span id="execution-results-GETapi-v1-invoices--invoice_number-" hidden>
+    <blockquote>Received response<span
+                id="execution-response-status-GETapi-v1-invoices--invoice_number-"></span>:
+    </blockquote>
+    <pre class="json"><code id="execution-response-content-GETapi-v1-invoices--invoice_number-"
+      data-empty-response-text="<Empty response>" style="max-height: 400px;"></code></pre>
+</span>
+<span id="execution-error-GETapi-v1-invoices--invoice_number-" hidden>
+    <blockquote>Request failed with error:</blockquote>
+    <pre><code id="execution-error-message-GETapi-v1-invoices--invoice_number-">
+
+Tip: Check that you&#039;re properly connected to the network.
+If you&#039;re a maintainer of ths API, verify that your API is running and you&#039;ve enabled CORS.
+You can check the Dev Tools console for debugging information.</code></pre>
+</span>
+<form id="form-GETapi-v1-invoices--invoice_number-" data-method="GET"
+      data-path="api/v1/invoices/{invoice_number}"
+      data-authed="1"
+      data-hasfiles="0"
+      data-isarraybody="0"
+      autocomplete="off"
+      onsubmit="event.preventDefault(); executeTryOut('GETapi-v1-invoices--invoice_number-', this);">
+    <h3>
+        Request&nbsp;&nbsp;&nbsp;
+            </h3>
+            <p>
+            <small class="badge badge-green">GET</small>
+            <b><code>api/v1/invoices/{invoice_number}</code></b>
+        </p>
+                <h4 class="fancy-heading-panel"><b>Headers</b></h4>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Authorization</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Authorization" class="auth-value"               data-endpoint="GETapi-v1-invoices--invoice_number-"
+               value="Bearer {STAFF_TOKEN}"
+               data-component="header">
+    <br>
+<p>Example: <code>Bearer {STAFF_TOKEN}</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Content-Type</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Content-Type"                data-endpoint="GETapi-v1-invoices--invoice_number-"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Accept</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Accept"                data-endpoint="GETapi-v1-invoices--invoice_number-"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                        <h4 class="fancy-heading-panel"><b>URL Parameters</b></h4>
+                    <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>invoice_number</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="invoice_number"                data-endpoint="GETapi-v1-invoices--invoice_number-"
+               value="INV-2026-0001"
+               data-component="url">
+    <br>
+<p>Invoice number, not the internal UUID. Example: <code>INV-2026-0001</code></p>
+            </div>
+                    </form>
+
+    <h3>Response</h3>
+    <h4 class="fancy-heading-panel"><b>Response Fields</b></h4>
+    <div style=" padding-left: 28px;  clear: unset;">
+        <details>
+            <summary style="padding-bottom: 10px;">
+                <b style="line-height: 2;"><code>data</code></b>&nbsp;&nbsp;
+<small>object</small>&nbsp;
+ &nbsp;
+ &nbsp;
+<br>
+
+            </summary>
+                                                <div style="margin-left: 14px; clear: unset;">
+                        <b style="line-height: 2;"><code>status</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+<br>
+<p>unpaid, paid, expired or refunded, derived from ledger facts.</p>
+                    </div>
+                                                                <div style=" margin-left: 14px; clear: unset;">
+        <details>
+            <summary style="padding-bottom: 10px;">
+                <b style="line-height: 2;"><code>transactions</code></b>&nbsp;&nbsp;
+<small>object[]</small>&nbsp;
+ &nbsp;
+ &nbsp;
+<br>
+<p>Ordered ledger history. Informational events have a null amount.</p>
+            </summary>
+                                                <div style="margin-left: 28px; clear: unset;">
+                        <b style="line-height: 2;"><code>annotation</code></b>&nbsp;&nbsp;
+<small>string|null</small>&nbsp;
+ &nbsp;
+ &nbsp;
+<br>
+<p>amount_mismatch, duplicate_payment, needs_review or null.</p>
+                    </div>
+                                    </details>
+        </div>
+                                        </details>
+        </div>
+                    <h1 id="webhooks">Webhooks</h1>
+
+    
+
+                                <h2 id="webhooks-POSTapi-v1-webhooks-payments">Receive a signed gateway notification</h2>
+
+<p>
+</p>
+
+<p>Sign the exact raw JSON bytes with HMAC-SHA256 using the institution's
+database secret as the literal text key (not hex-decoded). X-Signature
+is the lowercase hexadecimal digest. Verification precedes JSON validation.
+The example signature is a placeholder, not a valid signed request.</p>
+<p>Canonical events (accepted aliases): payment.authorization (payment.pending),
+payment.capture (payment.success), payment.failure, payment_request.expiry
+(payment.expired), refund.succeeded (payment.refunded), and refund.failed.
+Event names are normalized before constructing the institution-scoped key.
+Captures sum captures[].capture_amount; refunds resolve through a prior
+gateway payment id, ignoring any reference_id. Only IDR is accepted.
+Every received notification is audited, including unauthorized and invalid
+requests. Every 2xx stops retries; reconciliation can recover unmatched events.</p>
+
+<span id="example-requests-POSTapi-v1-webhooks-payments">
+<blockquote>Example request:</blockquote>
+
+
+<div class="bash-example">
+    <pre><code class="language-bash">curl --request POST \
+    "http://localhost:8000/api/v1/webhooks/payments" \
+    --header "X-Institution-Code: UNIV-A" \
+    --header "X-Signature: {RAW_BODY_HMAC}" \
+    --header "Content-Type: application/json" \
+    --header "Accept: application/json" \
+    --data "{
+    \"event\": \"payment.capture\",
+    \"business_id\": \"UNIV-A\",
+    \"created\": \"2026-10-11T01:00:00Z\",
+    \"data\": {
+        \"payment_id\": \"py-example\",
+        \"payment_request_id\": \"pr-example\",
+        \"reference_id\": \"INV-2026-0001\",
+        \"currency\": \"IDR\",
+        \"updated\": \"2026-10-11T01:00:00Z\",
+        \"captures\": [
+            {
+                \"capture_amount\": 1500000
+            }
+        ]
+    }
+}"
+</code></pre></div>
+
+</span>
+
+<span id="example-responses-POSTapi-v1-webhooks-payments">
+            <blockquote>
+            <p>Example response (200, accepted):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">200 {&quot;outcome&quot;:&quot;accepted&quot;}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (200, duplicate):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">200 {&quot;outcome&quot;:&quot;duplicate&quot;}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (202):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;outcome&quot;: &quot;unmatched&quot;
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (401):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;Invalid signature.&quot;
+}</code>
+ </pre>
+            <blockquote>
+            <p>Example response (422):</p>
+        </blockquote>
+                <pre>
+
+<code class="language-json" style="max-height: 300px;">{
+    &quot;message&quot;: &quot;Only IDR is accepted.&quot;,
+    &quot;errors&quot;: {
+        &quot;data.currency&quot;: [
+            &quot;Only IDR is accepted.&quot;
+        ]
+    }
+}</code>
+ </pre>
+    </span>
+<span id="execution-results-POSTapi-v1-webhooks-payments" hidden>
+    <blockquote>Received response<span
+                id="execution-response-status-POSTapi-v1-webhooks-payments"></span>:
+    </blockquote>
+    <pre class="json"><code id="execution-response-content-POSTapi-v1-webhooks-payments"
+      data-empty-response-text="<Empty response>" style="max-height: 400px;"></code></pre>
+</span>
+<span id="execution-error-POSTapi-v1-webhooks-payments" hidden>
+    <blockquote>Request failed with error:</blockquote>
+    <pre><code id="execution-error-message-POSTapi-v1-webhooks-payments">
+
+Tip: Check that you&#039;re properly connected to the network.
+If you&#039;re a maintainer of ths API, verify that your API is running and you&#039;ve enabled CORS.
+You can check the Dev Tools console for debugging information.</code></pre>
+</span>
+<form id="form-POSTapi-v1-webhooks-payments" data-method="POST"
+      data-path="api/v1/webhooks/payments"
+      data-authed="0"
+      data-hasfiles="0"
+      data-isarraybody="0"
+      autocomplete="off"
+      onsubmit="event.preventDefault(); executeTryOut('POSTapi-v1-webhooks-payments', this);">
+    <h3>
+        Request&nbsp;&nbsp;&nbsp;
+            </h3>
+            <p>
+            <small class="badge badge-black">POST</small>
+            <b><code>api/v1/webhooks/payments</code></b>
+        </p>
+                <h4 class="fancy-heading-panel"><b>Headers</b></h4>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>X-Institution-Code</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="X-Institution-Code"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="UNIV-A"
+               data-component="header">
+    <br>
+<p>Example: <code>UNIV-A</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>X-Signature</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="X-Signature"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="{RAW_BODY_HMAC}"
+               data-component="header">
+    <br>
+<p>Example: <code>{RAW_BODY_HMAC}</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Content-Type</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Content-Type"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Accept</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Accept"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <h4 class="fancy-heading-panel"><b>Body Parameters</b></h4>
+        <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>event</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="event"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="payment.capture"
+               data-component="body">
+    <br>
+<p>Supported canonical event or alias. Example: <code>payment.capture</code></p>
+        </div>
+                <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>business_id</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="business_id"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="UNIV-A"
+               data-component="body">
+    <br>
+<p>Gateway account identifier; does not select the institution. Example: <code>UNIV-A</code></p>
+        </div>
+                <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>created</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="created"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="2026-10-11T01:00:00Z"
+               data-component="body">
+    <br>
+<p>Gateway envelope creation value; ordering uses data.updated instead. Example: <code>2026-10-11T01:00:00Z</code></p>
+        </div>
+                <div style=" padding-left: 28px;  clear: unset;">
+        <details>
+            <summary style="padding-bottom: 10px;">
+                <b style="line-height: 2;"><code>data</code></b>&nbsp;&nbsp;
+<small>object</small>&nbsp;
+ &nbsp;
+ &nbsp;
+<br>
+<p>Event resource.</p>
+            </summary>
+                                                <div style="margin-left: 14px; clear: unset;">
+                        <b style="line-height: 2;"><code>payment_id</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+<i>optional</i> &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="data.payment_id"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="py-example"
+               data-component="body">
+    <br>
+<p>Payment resource id; required for payment events and refunds, up to 64 characters. Example: <code>py-example</code></p>
+                    </div>
+                                                                <div style="margin-left: 14px; clear: unset;">
+                        <b style="line-height: 2;"><code>payment_request_id</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+<i>optional</i> &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="data.payment_request_id"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="pr-example"
+               data-component="body">
+    <br>
+<p>Required for expiry; up to 64 characters. Example: <code>pr-example</code></p>
+                    </div>
+                                                                <div style="margin-left: 14px; clear: unset;">
+                        <b style="line-height: 2;"><code>id</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+<i>optional</i> &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="data.id"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value=""
+               data-component="body">
+    <br>
+<p>Required refund resource id; up to 64 characters.</p>
+                    </div>
+                                                                <div style="margin-left: 14px; clear: unset;">
+                        <b style="line-height: 2;"><code>reference_id</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+<i>optional</i> &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="data.reference_id"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="INV-2026-0001"
+               data-component="body">
+    <br>
+<p>Required invoice number for non-refund events; up to 64 characters. Example: <code>INV-2026-0001</code></p>
+                    </div>
+                                                                <div style="margin-left: 14px; clear: unset;">
+                        <b style="line-height: 2;"><code>currency</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="data.currency"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="IDR"
+               data-component="body">
+    <br>
+<p>Must be IDR. Example: <code>IDR</code></p>
+                    </div>
+                                                                <div style="margin-left: 14px; clear: unset;">
+                        <b style="line-height: 2;"><code>updated</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="data.updated"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="2026-10-11T01:00:00Z"
+               data-component="body">
+    <br>
+<p>ISO 8601 with offset; after 2000-01-01 and at most one hour ahead of the server clock. Example: <code>2026-10-11T01:00:00Z</code></p>
+                    </div>
+                                                                <div style="margin-left: 14px; clear: unset;">
+                        <b style="line-height: 2;"><code>amount</code></b>&nbsp;&nbsp;
+<small>integer</small>&nbsp;
+<i>optional</i> &nbsp;
+ &nbsp;
+                <input type="number" style="display: none"
+               step="any"               name="data.amount"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value=""
+               data-component="body">
+    <br>
+<p>Required for refunds; whole rupiah from 1 to 1000000000000. Canonical digit strings also accepted.</p>
+                    </div>
+                                                                <div style=" margin-left: 14px; clear: unset;">
+        <details>
+            <summary style="padding-bottom: 10px;">
+                <b style="line-height: 2;"><code>captures</code></b>&nbsp;&nbsp;
+<small>object[]</small>&nbsp;
+<i>optional</i> &nbsp;
+ &nbsp;
+<br>
+<p>Required nonempty list for capture events.</p>
+            </summary>
+                                                <div style="margin-left: 28px; clear: unset;">
+                        <b style="line-height: 2;"><code>capture_amount</code></b>&nbsp;&nbsp;
+<small>integer</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="number" style="display: none"
+               step="any"               name="data.captures.0.capture_amount"                data-endpoint="POSTapi-v1-webhooks-payments"
+               value="1500000"
+               data-component="body">
+    <br>
+<p>Whole rupiah from 1 to 1000000000000; decimal and scientific notation are rejected. Example: <code>1500000</code></p>
+                    </div>
+                                    </details>
+        </div>
+                                        </details>
+        </div>
+        </form>
+
+            
+
+        
+    </div>
+    <div class="dark-box">
+                    <div class="lang-selector">
+                                                        <button type="button" class="lang-button" data-language-name="bash">bash</button>
+                            </div>
+            </div>
+</div>
+</body>
+</html>

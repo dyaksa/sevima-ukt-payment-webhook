@@ -1,0 +1,594 @@
+openapi: 3.0.3
+info:
+  title: 'UKT Payment API'
+  description: 'Institution-isolated tuition invoices and signed mock gateway notifications.'
+  version: 1.0.0
+servers:
+  -
+    url: 'http://localhost:8000'
+tags:
+  -
+    name: Invoices
+    description: ''
+  -
+    name: Webhooks
+    description: ''
+components:
+  securitySchemes:
+    default:
+      type: http
+      scheme: bearer
+      description: "Run `vendor/bin/sail artisan token:issue finance@univ-a.test`. Read routes require `invoices:read`; issuing an invoice requires `invoices:write`. Tokens belong to the staff user's institution. Webhooks use HMAC headers instead of a bearer token."
+security:
+  -
+    default: []
+paths:
+  /api/v1/invoices:
+    get:
+      summary: "List a student's invoices"
+      operationId: listAStudentsInvoices
+      description: "Requires invoices:read. Returns only the caller's institution, newest semester\nfirst, with history ordered by occurred_at then id. An empty match returns data: [].\nThe explicit institution filter is the second layer behind the global scope."
+      parameters:
+        -
+          in: query
+          name: student_number
+          description: 'Student number, up to 32 characters.'
+          example: '20260001'
+          required: true
+          schema:
+            type: string
+            description: 'Student number, up to 32 characters.'
+            example: '20260001'
+        -
+          in: query
+          name: semester
+          description: 'Optional semester in YYYY1 or YYYY2 format.'
+          example: '20261'
+          required: false
+          schema:
+            type: string
+            description: 'Optional semester in YYYY1 or YYYY2 format.'
+            example: '20261'
+      responses:
+        200:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  data:
+                    -
+                      invoice_number: INV-2026-0001
+                      student_number: '20260001'
+                      semester: '20261'
+                      amount: 1500000
+                      status: unpaid
+                      expires_at: '2027-01-01T00:00:00+00:00'
+                      created_at: '2026-10-11T00:00:00+00:00'
+                      transactions: []
+                properties:
+                  data:
+                    type: array
+                    example:
+                      -
+                        invoice_number: INV-2026-0001
+                        student_number: '20260001'
+                        semester: '20261'
+                        amount: 1500000
+                        status: unpaid
+                        expires_at: '2027-01-01T00:00:00+00:00'
+                        created_at: '2026-10-11T00:00:00+00:00'
+                        transactions: []
+                    items:
+                      type: object
+                      properties:
+                        invoice_number:
+                          type: string
+                          example: INV-2026-0001
+                        student_number:
+                          type: string
+                          example: '20260001'
+                        semester:
+                          type: string
+                          example: '20261'
+                        amount:
+                          type: integer
+                          example: 1500000
+                        status:
+                          type: string
+                          example: unpaid
+                        expires_at:
+                          type: string
+                          example: '2027-01-01T00:00:00+00:00'
+                        created_at:
+                          type: string
+                          example: '2026-10-11T00:00:00+00:00'
+                        transactions:
+                          type: array
+                          example: []
+        401:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: Unauthenticated.
+                properties:
+                  message:
+                    type: string
+                    example: Unauthenticated.
+        403:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: 'Invalid ability provided.'
+                properties:
+                  message:
+                    type: string
+                    example: 'Invalid ability provided.'
+        422:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: 'The student number field is required.'
+                  errors:
+                    student_number:
+                      - 'The student number field is required.'
+                properties:
+                  message:
+                    type: string
+                    example: 'The student number field is required.'
+                  errors:
+                    type: object
+                    properties:
+                      student_number:
+                        type: array
+                        example:
+                          - 'The student number field is required.'
+                        items:
+                          type: string
+      tags:
+        - Invoices
+    post:
+      summary: 'Issue an invoice'
+      operationId: issueAnInvoice
+      description: "Requires invoices:write. Institution ownership comes from the staff token;\na body institution_id is ignored. Duplicate invoice numbers in the same\ninstitution return 422. Identifiers must have no whitespace\nat their boundaries or control characters. The initial status is unpaid."
+      parameters: []
+      responses:
+        201:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  data:
+                    invoice_number: INV-2026-0001
+                    student_number: '20260001'
+                    semester: '20261'
+                    amount: 1500000
+                    status: unpaid
+                    expires_at: '2027-01-01T00:00:00+00:00'
+                    created_at: '2026-10-11T00:00:00+00:00'
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      invoice_number:
+                        type: string
+                        example: INV-2026-0001
+                      student_number:
+                        type: string
+                        example: '20260001'
+                      semester:
+                        type: string
+                        example: '20261'
+                      amount:
+                        type: integer
+                        example: 1500000
+                      status:
+                        type: string
+                        example: unpaid
+                      expires_at:
+                        type: string
+                        example: '2027-01-01T00:00:00+00:00'
+                      created_at:
+                        type: string
+                        example: '2026-10-11T00:00:00+00:00'
+        401:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: Unauthenticated.
+                properties:
+                  message:
+                    type: string
+                    example: Unauthenticated.
+        403:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: 'Invalid ability provided.'
+                properties:
+                  message:
+                    type: string
+                    example: 'Invalid ability provided.'
+        422:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: 'The invoice number has already been taken.'
+                  errors:
+                    invoice_number:
+                      - 'The invoice number has already been taken.'
+                properties:
+                  message:
+                    type: string
+                    example: 'The invoice number has already been taken.'
+                  errors:
+                    type: object
+                    properties:
+                      invoice_number:
+                        type: array
+                        example:
+                          - 'The invoice number has already been taken.'
+                        items:
+                          type: string
+      tags:
+        - Invoices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invoice_number:
+                  type: string
+                  description: 'Unique number within the institution, up to 64 characters.'
+                  example: INV-2026-0001
+                student_number:
+                  type: string
+                  description: 'Student number, up to 32 characters.'
+                  example: '20260001'
+                semester:
+                  type: string
+                  description: 'Semester in YYYY1 or YYYY2 format.'
+                  example: '20261'
+                amount:
+                  type: integer
+                  description: 'Whole rupiah from 1 to 1000000000000; decimal and scientific notation are rejected. A canonical digit string is also accepted.'
+                  example: 1500000
+                expires_at:
+                  type: string
+                  description: 'Future date/time.'
+                  example: '2027-01-01T00:00:00+00:00'
+              required:
+                - invoice_number
+                - student_number
+                - semester
+                - amount
+                - expires_at
+  '/api/v1/invoices/{invoice_number}':
+    get:
+      summary: 'Show an invoice and its history'
+      operationId: showAnInvoiceAndItsHistory
+      description: "Requires invoices:read. A missing invoice or another institution's invoice\nreturns 404. History is append-only, ordered by occurred_at then id, and\nincludes annotations derived from the ledger rather than stored edits."
+      parameters: []
+      responses:
+        200:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  data:
+                    invoice_number: INV-2026-0001
+                    student_number: '20260001'
+                    semester: '20261'
+                    amount: 1500000
+                    status: paid
+                    expires_at: '2027-01-01T00:00:00+00:00'
+                    created_at: '2026-10-11T00:00:00+00:00'
+                    transactions:
+                      -
+                        kind: payment
+                        annotation: null
+                        amount: 1500000
+                        occurred_at: '2026-10-11T01:00:00+00:00'
+                        gateway_payment_id: py-example
+                        source: webhook
+                        idempotency_key: 'payment.capture:py-example'
+                        recorded_at: '2026-10-11T01:00:01+00:00'
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      invoice_number:
+                        type: string
+                        example: INV-2026-0001
+                      student_number:
+                        type: string
+                        example: '20260001'
+                      semester:
+                        type: string
+                        example: '20261'
+                      amount:
+                        type: integer
+                        example: 1500000
+                      status:
+                        type: string
+                        example: paid
+                        description: 'unpaid, paid, expired or refunded, derived from ledger facts.'
+                      expires_at:
+                        type: string
+                        example: '2027-01-01T00:00:00+00:00'
+                      created_at:
+                        type: string
+                        example: '2026-10-11T00:00:00+00:00'
+                      transactions:
+                        type: array
+                        example:
+                          -
+                            kind: payment
+                            annotation: null
+                            amount: 1500000
+                            occurred_at: '2026-10-11T01:00:00+00:00'
+                            gateway_payment_id: py-example
+                            source: webhook
+                            idempotency_key: 'payment.capture:py-example'
+                            recorded_at: '2026-10-11T01:00:01+00:00'
+                        description: 'Ordered ledger history. Informational events have a null amount.'
+                        items:
+                          type: object
+                          properties:
+                            kind:
+                              type: string
+                              example: payment
+                            annotation:
+                              type: string
+                              example: null
+                              nullable: true
+                            amount:
+                              type: integer
+                              example: 1500000
+                            occurred_at:
+                              type: string
+                              example: '2026-10-11T01:00:00+00:00'
+                            gateway_payment_id:
+                              type: string
+                              example: py-example
+                            source:
+                              type: string
+                              example: webhook
+                            idempotency_key:
+                              type: string
+                              example: 'payment.capture:py-example'
+                            recorded_at:
+                              type: string
+                              example: '2026-10-11T01:00:01+00:00'
+        401:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: Unauthenticated.
+                properties:
+                  message:
+                    type: string
+                    example: Unauthenticated.
+        403:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: 'Invalid ability provided.'
+                properties:
+                  message:
+                    type: string
+                    example: 'Invalid ability provided.'
+        404:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: 'No query results for model [App\Models\Invoice] INV-2026-0001'
+                properties:
+                  message:
+                    type: string
+                    example: 'No query results for model [App\Models\Invoice] INV-2026-0001'
+      tags:
+        - Invoices
+    parameters:
+      -
+        in: path
+        name: invoice_number
+        description: 'Invoice number, not the internal UUID.'
+        example: INV-2026-0001
+        required: true
+        schema:
+          type: string
+  /api/v1/webhooks/payments:
+    post:
+      summary: 'Receive a signed gateway notification'
+      operationId: receiveASignedGatewayNotification
+      description: "Sign the exact raw JSON bytes with HMAC-SHA256 using the institution's\ndatabase secret as the literal text key (not hex-decoded). X-Signature\nis the lowercase hexadecimal digest. Verification precedes JSON validation.\nThe example signature is a placeholder, not a valid signed request.\n\nCanonical events (accepted aliases): payment.authorization (payment.pending),\npayment.capture (payment.success), payment.failure, payment_request.expiry\n(payment.expired), refund.succeeded (payment.refunded), and refund.failed.\nEvent names are normalized before constructing the institution-scoped key.\nCaptures sum captures[].capture_amount; refunds resolve through a prior\ngateway payment id, ignoring any reference_id. Only IDR is accepted.\nEvery received notification is audited, including unauthorized and invalid\nrequests. Every 2xx stops retries; reconciliation can recover unmatched events."
+      parameters:
+        -
+          in: header
+          name: X-Institution-Code
+          description: ''
+          example: UNIV-A
+          schema:
+            type: string
+        -
+          in: header
+          name: X-Signature
+          description: ''
+          example: '{RAW_BODY_HMAC}'
+          schema:
+            type: string
+      responses:
+        200:
+          description: ''
+          content:
+            text/plain:
+              schema:
+                oneOf:
+                  -
+                    description: accepted
+                    type: string
+                    example: '200 {"outcome":"accepted"}'
+                  -
+                    description: duplicate
+                    type: string
+                    example: '200 {"outcome":"duplicate"}'
+        202:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  outcome: unmatched
+                properties:
+                  outcome:
+                    type: string
+                    example: unmatched
+        401:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: 'Invalid signature.'
+                properties:
+                  message:
+                    type: string
+                    example: 'Invalid signature.'
+        422:
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  message: 'Only IDR is accepted.'
+                  errors:
+                    data.currency:
+                      - 'Only IDR is accepted.'
+                properties:
+                  message:
+                    type: string
+                    example: 'Only IDR is accepted.'
+                  errors:
+                    type: object
+                    properties:
+                      data.currency:
+                        type: array
+                        example:
+                          - 'Only IDR is accepted.'
+                        items:
+                          type: string
+      tags:
+        - Webhooks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event:
+                  type: string
+                  description: 'Supported canonical event or alias.'
+                  example: payment.capture
+                business_id:
+                  type: string
+                  description: 'Gateway account identifier; does not select the institution.'
+                  example: UNIV-A
+                created:
+                  type: string
+                  description: 'Gateway envelope creation value; ordering uses data.updated instead.'
+                  example: '2026-10-11T01:00:00Z'
+                data:
+                  type: object
+                  description: 'Event resource.'
+                  example: []
+                  properties:
+                    payment_id:
+                      type: string
+                      description: 'Payment resource id; required for payment events and refunds, up to 64 characters.'
+                      example: py-example
+                    payment_request_id:
+                      type: string
+                      description: 'Required for expiry; up to 64 characters.'
+                      example: pr-example
+                    id:
+                      type: string
+                      description: 'Required refund resource id; up to 64 characters.'
+                      example: null
+                    reference_id:
+                      type: string
+                      description: 'Required invoice number for non-refund events; up to 64 characters.'
+                      example: INV-2026-0001
+                    currency:
+                      type: string
+                      description: 'Must be IDR.'
+                      example: IDR
+                    updated:
+                      type: string
+                      description: 'ISO 8601 with offset; after 2000-01-01 and at most one hour ahead of the server clock.'
+                      example: '2026-10-11T01:00:00Z'
+                    amount:
+                      type: integer
+                      description: 'Required for refunds; whole rupiah from 1 to 1000000000000. Canonical digit strings also accepted.'
+                      example: null
+                    captures:
+                      type: array
+                      description: 'Required nonempty list for capture events.'
+                      example:
+                        - []
+                      items:
+                        type: object
+                        properties:
+                          capture_amount:
+                            type: integer
+                            description: 'Whole rupiah from 1 to 1000000000000; decimal and scientific notation are rejected.'
+                            example: 1500000
+                        required:
+                          - capture_amount
+                  required:
+                    - currency
+                    - updated
+              required:
+                - event
+                - business_id
+                - created
+                - data
+      security: []

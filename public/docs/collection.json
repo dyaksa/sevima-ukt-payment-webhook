@@ -1,0 +1,284 @@
+{
+    "variable": [
+        {
+            "id": "baseUrl",
+            "key": "baseUrl",
+            "type": "string",
+            "name": "string",
+            "value": "http:\/\/localhost:8000"
+        }
+    ],
+    "info": {
+        "name": "UKT Payment API",
+        "_postman_id": "b8170880-1a00-48fe-98af-386338c9414a",
+        "description": "Institution-isolated tuition invoices and signed mock gateway notifications.",
+        "schema": "https:\/\/schema.getpostman.com\/json\/collection\/v2.1.0\/collection.json"
+    },
+    "item": [
+        {
+            "name": "Invoices",
+            "description": "",
+            "item": [
+                {
+                    "name": "List a student's invoices",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/v1\/invoices",
+                            "query": [
+                                {
+                                    "key": "student_number",
+                                    "value": "20260001",
+                                    "description": "Student number, up to 32 characters.",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "semester",
+                                    "value": "20261",
+                                    "description": "Optional semester in YYYY1 or YYYY2 format.",
+                                    "disabled": false
+                                }
+                            ],
+                            "raw": "{{baseUrl}}\/api\/v1\/invoices?student_number=20260001&semester=20261"
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "Requires invoices:read. Returns only the caller's institution, newest semester\nfirst, with history ordered by occurred_at then id. An empty match returns data: [].\nThe explicit institution filter is the second layer behind the global scope."
+                    },
+                    "response": [
+                        {
+                            "header": [],
+                            "code": 200,
+                            "body": "{\"data\":[{\"invoice_number\":\"INV-2026-0001\",\"student_number\":\"20260001\",\"semester\":\"20261\",\"amount\":1500000,\"status\":\"unpaid\",\"expires_at\":\"2027-01-01T00:00:00+00:00\",\"created_at\":\"2026-10-11T00:00:00+00:00\",\"transactions\":[]}]}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 401,
+                            "body": "{\"message\":\"Unauthenticated.\"}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 403,
+                            "body": "{\"message\":\"Invalid ability provided.\"}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 422,
+                            "body": "{\"message\":\"The student number field is required.\",\"errors\":{\"student_number\":[\"The student number field is required.\"]}}",
+                            "name": ""
+                        }
+                    ]
+                },
+                {
+                    "name": "Issue an invoice",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/v1\/invoices",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/v1\/invoices"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"invoice_number\":\"INV-2026-0001\",\"student_number\":\"20260001\",\"semester\":\"20261\",\"amount\":1500000,\"expires_at\":\"2027-01-01T00:00:00+00:00\"}"
+                        },
+                        "description": "Requires invoices:write. Institution ownership comes from the staff token;\na body institution_id is ignored. Duplicate invoice numbers in the same\ninstitution return 422. Identifiers must have no whitespace\nat their boundaries or control characters. The initial status is unpaid."
+                    },
+                    "response": [
+                        {
+                            "header": [],
+                            "code": 201,
+                            "body": "{\"data\":{\"invoice_number\":\"INV-2026-0001\",\"student_number\":\"20260001\",\"semester\":\"20261\",\"amount\":1500000,\"status\":\"unpaid\",\"expires_at\":\"2027-01-01T00:00:00+00:00\",\"created_at\":\"2026-10-11T00:00:00+00:00\"}}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 401,
+                            "body": "{\"message\":\"Unauthenticated.\"}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 403,
+                            "body": "{\"message\":\"Invalid ability provided.\"}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 422,
+                            "body": "{\"message\":\"The invoice number has already been taken.\",\"errors\":{\"invoice_number\":[\"The invoice number has already been taken.\"]}}",
+                            "name": ""
+                        }
+                    ]
+                },
+                {
+                    "name": "Show an invoice and its history",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/v1\/invoices\/:invoice_number",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/v1\/invoices\/:invoice_number",
+                            "variable": [
+                                {
+                                    "id": "invoice_number",
+                                    "key": "invoice_number",
+                                    "value": "INV-2026-0001",
+                                    "description": "Invoice number, not the internal UUID."
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": null,
+                        "description": "Requires invoices:read. A missing invoice or another institution's invoice\nreturns 404. History is append-only, ordered by occurred_at then id, and\nincludes annotations derived from the ledger rather than stored edits."
+                    },
+                    "response": [
+                        {
+                            "header": [],
+                            "code": 200,
+                            "body": "{\"data\":{\"invoice_number\":\"INV-2026-0001\",\"student_number\":\"20260001\",\"semester\":\"20261\",\"amount\":1500000,\"status\":\"paid\",\"expires_at\":\"2027-01-01T00:00:00+00:00\",\"created_at\":\"2026-10-11T00:00:00+00:00\",\"transactions\":[{\"kind\":\"payment\",\"annotation\":null,\"amount\":1500000,\"occurred_at\":\"2026-10-11T01:00:00+00:00\",\"gateway_payment_id\":\"py-example\",\"source\":\"webhook\",\"idempotency_key\":\"payment.capture:py-example\",\"recorded_at\":\"2026-10-11T01:00:01+00:00\"}]}}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 401,
+                            "body": "{\"message\":\"Unauthenticated.\"}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 403,
+                            "body": "{\"message\":\"Invalid ability provided.\"}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 404,
+                            "body": "{\"message\":\"No query results for model [App\\\\Models\\\\Invoice] INV-2026-0001\"}",
+                            "name": ""
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Webhooks",
+            "description": "",
+            "item": [
+                {
+                    "name": "Receive a signed gateway notification",
+                    "request": {
+                        "url": {
+                            "host": "{{baseUrl}}",
+                            "path": "api\/v1\/webhooks\/payments",
+                            "query": [],
+                            "raw": "{{baseUrl}}\/api\/v1\/webhooks\/payments"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "X-Institution-Code",
+                                "value": "UNIV-A"
+                            },
+                            {
+                                "key": "X-Signature",
+                                "value": "{RAW_BODY_HMAC}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application\/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application\/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"event\":\"payment.capture\",\"business_id\":\"UNIV-A\",\"created\":\"2026-10-11T01:00:00Z\",\"data\":{\"payment_id\":\"py-example\",\"payment_request_id\":\"pr-example\",\"reference_id\":\"INV-2026-0001\",\"currency\":\"IDR\",\"updated\":\"2026-10-11T01:00:00Z\",\"captures\":[{\"capture_amount\":1500000}]}}"
+                        },
+                        "description": "Sign the exact raw JSON bytes with HMAC-SHA256 using the institution's\ndatabase secret as the literal text key (not hex-decoded). X-Signature\nis the lowercase hexadecimal digest. Verification precedes JSON validation.\nThe example signature is a placeholder, not a valid signed request.\n\nCanonical events (accepted aliases): payment.authorization (payment.pending),\npayment.capture (payment.success), payment.failure, payment_request.expiry\n(payment.expired), refund.succeeded (payment.refunded), and refund.failed.\nEvent names are normalized before constructing the institution-scoped key.\nCaptures sum captures[].capture_amount; refunds resolve through a prior\ngateway payment id, ignoring any reference_id. Only IDR is accepted.\nEvery received notification is audited, including unauthorized and invalid\nrequests. Every 2xx stops retries; reconciliation can recover unmatched events.",
+                        "auth": {
+                            "type": "noauth"
+                        }
+                    },
+                    "response": [
+                        {
+                            "header": [],
+                            "code": 200,
+                            "body": "200 {\"outcome\":\"accepted\"}",
+                            "name": "accepted"
+                        },
+                        {
+                            "header": [],
+                            "code": 200,
+                            "body": "200 {\"outcome\":\"duplicate\"}",
+                            "name": "duplicate"
+                        },
+                        {
+                            "header": [],
+                            "code": 202,
+                            "body": "{\"outcome\":\"unmatched\"}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 401,
+                            "body": "{\"message\":\"Invalid signature.\"}",
+                            "name": ""
+                        },
+                        {
+                            "header": [],
+                            "code": 422,
+                            "body": "{\"message\":\"Only IDR is accepted.\",\"errors\":{\"data.currency\":[\"Only IDR is accepted.\"]}}",
+                            "name": ""
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "auth": {
+        "type": "bearer",
+        "bearer": [
+            {
+                "key": "Authorization",
+                "type": "string"
+            }
+        ]
+    }
+}
